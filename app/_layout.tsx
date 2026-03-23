@@ -1,24 +1,42 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-
-import { useColorScheme } from '@/hooks/use-color-scheme';
-
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+import { useFonts } from "expo-font";
+import { Stack } from "expo-router";
+import { Text, View } from "react-native";
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  const [loaded, error] = useFonts({
+    KCC: require("../assets/fonts/KCC-Ganpan.ttf"),
+    Nanum: require("../assets/fonts/NanumSquareRoundB.ttf"),
+    NanumB: require("../assets/fonts/NanumSquareRoundEB.ttf"),
+  });
+
+  if (error) {
+    console.log("폰트 로딩 에러:", error);
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <Text>폰트 로딩 에러</Text>
+      </View>
+    );
+  }
+
+  if (!loaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <Text>로딩 중...</Text>
+      </View>
+    );
+  }
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" />
+      <Stack.Screen name="bcs-check" />
+      <Stack.Screen name="home" />
+      <Stack.Screen name="profile" />
+      <Stack.Screen name="camera-upload" />
+      <Stack.Screen name="analysis-guide" />
+      <Stack.Screen name="analysis-result" />
+      <Stack.Screen name="chatbot" />
+      <Stack.Screen name="records" />
+    </Stack>
   );
 }
