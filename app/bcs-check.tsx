@@ -13,6 +13,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
 
+type LoggedInUser = {
+  id: string;
+  email: string;
+  password: string;
+};
+
 const dogBcsList = [
   {
     label: "심한 저체중",
@@ -65,11 +71,25 @@ export default function BcsCheckScreen() {
 
   const [petType, setPetType] = useState<PetType>("");
   const [selectedBcs, setSelectedBcs] = useState<BcsLabel | "">("");
+  const [userEmail, setUserEmail] = useState("");
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const savedProfile = await AsyncStorage.getItem("petProfile");
+        const savedUser = await AsyncStorage.getItem("loggedInUser");
+        const parsedUser: LoggedInUser | null = savedUser
+          ? JSON.parse(savedUser)
+          : null;
+
+        if (!parsedUser?.email) {
+          router.replace("/" as any);
+          return;
+        }
+
+        const email = parsedUser.email;
+        setUserEmail(email);
+
+        const savedProfile = await AsyncStorage.getItem(`petProfile_${email}`);
         const parsed = savedProfile ? JSON.parse(savedProfile) : {};
 
         if (params?.petType && typeof params.petType === "string") {
@@ -89,7 +109,7 @@ export default function BcsCheckScreen() {
     };
 
     loadData();
-  }, [params?.petType, params?.selectedBcs]);
+  }, [params?.petType, params?.selectedBcs, router]);
 
   const list = petType === "고양이" ? catBcsList : dogBcsList;
   const title =
@@ -113,18 +133,26 @@ export default function BcsCheckScreen() {
     }
 
     try {
-      const savedProfile = await AsyncStorage.getItem("petProfile");
+      if (!userEmail) {
+        Alert.alert("오류", "로그인 정보가 없습니다.");
+        router.replace("/" as any);
+        return;
+      }
+
+      const savedProfile = await AsyncStorage.getItem(
+        `petProfile_${userEmail}`,
+      );
       const parsed = savedProfile ? JSON.parse(savedProfile) : {};
 
       await AsyncStorage.setItem(
-        "petProfile",
+        `petProfile_${userEmail}`,
         JSON.stringify({
           ...parsed,
           bcs: selectedBcs,
         }),
       );
 
-      await AsyncStorage.setItem("profileCompleted", "true");
+      await AsyncStorage.setItem(`profileCompleted_${userEmail}`, "true");
       router.replace("/home" as any);
     } catch (error) {
       console.log(error);

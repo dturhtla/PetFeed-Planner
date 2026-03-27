@@ -2,6 +2,9 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -10,227 +13,179 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-export default function IndexScreen() {
+type User = {
+  id: string;
+  email: string;
+  password: string;
+};
+
+export default function LoginScreen() {
   const router = useRouter();
+  const [id, setId] = useState("");
+  const [password, setPassword] = useState("");
 
-  const [name, setName] = useState("");
-  const [age, setAge] = useState("");
-  const [weight, setWeight] = useState("");
-  const [gender, setGender] = useState("");
-  const [petType, setPetType] = useState("");
+  const handleLogin = async () => {
+    try {
+      if (!id.trim()) {
+        Alert.alert("로그인 실패", "아이디를 입력해주세요.");
+        return;
+      }
 
-  const handleNext = async () => {
-    if (!name || !age || !weight || !gender || !petType) {
-      alert("모든 정보를 입력하거나 선택해주세요!");
-      return;
+      if (!password.trim()) {
+        Alert.alert("로그인 실패", "비밀번호를 입력해주세요.");
+        return;
+      }
+
+      const savedUsers = await AsyncStorage.getItem("users");
+      const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
+
+      const foundUser = users.find(
+        (user) =>
+          user.id.toLowerCase() === id.trim().toLowerCase() &&
+          user.password === password,
+      );
+
+      if (!foundUser) {
+        Alert.alert("로그인 실패", "아이디 또는 비밀번호가 올바르지 않습니다.");
+        return;
+      }
+
+      await AsyncStorage.setItem("loggedInUser", JSON.stringify(foundUser));
+
+      const completed = await AsyncStorage.getItem(
+        `profileCompleted_${foundUser.email}`,
+      );
+
+      if (completed === "true") {
+        router.replace("/home" as any);
+      } else {
+        router.replace("/profile" as any);
+      }
+    } catch (error) {
+      console.log(error);
+      Alert.alert("오류", "로그인 중 문제가 발생했습니다.");
     }
-
-    await AsyncStorage.setItem(
-      "petProfile",
-      JSON.stringify({
-        name,
-        age,
-        weight,
-        gender,
-        petType,
-      }),
-    );
-
-    router.push("/bcs-check" as any);
   };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.container}>
-        <Text style={styles.title}>프로필 입력</Text>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        <View style={styles.container}>
+          <Text style={styles.logo}>PetFeed Planner</Text>
 
-        <TextInput
-          placeholder="이름"
-          placeholderTextColor="#777"
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-        />
+          <TextInput
+            style={styles.input}
+            placeholder="아이디"
+            placeholderTextColor="#777"
+            value={id}
+            onChangeText={setId}
+            autoCapitalize="none"
+          />
 
-        <TextInput
-          placeholder="나이"
-          placeholderTextColor="#777"
-          style={styles.input}
-          value={age}
-          onChangeText={setAge}
-          keyboardType="numeric"
-        />
+          <TextInput
+            style={styles.input}
+            placeholder="비밀번호"
+            placeholderTextColor="#777"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
 
-        <TextInput
-          placeholder="몸무게"
-          placeholderTextColor="#777"
-          style={styles.input}
-          value={weight}
-          onChangeText={setWeight}
-          keyboardType="numeric"
-        />
-
-        <Text style={styles.sectionLabel}>성별</Text>
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[
-              styles.selectButton,
-              gender === "남" && styles.selectedButton,
-            ]}
-            onPress={() => setGender("남")}
-          >
-            <Text
-              style={[
-                styles.selectText,
-                gender === "남" && styles.selectedText,
-              ]}
-            >
-              남
-            </Text>
+          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+            <Text style={styles.loginButtonText}>로그인</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[
-              styles.selectButton,
-              gender === "여" && styles.selectedButton,
-            ]}
-            onPress={() => setGender("여")}
-          >
-            <Text
-              style={[
-                styles.selectText,
-                gender === "여" && styles.selectedText,
-              ]}
-            >
-              여
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.linkContainer}>
+            <View style={styles.topLinkRow}>
+              <TouchableOpacity onPress={() => router.push("/signup" as any)}>
+                <Text style={styles.linkText}>회원가입</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.bottomLinkRow}>
+              <TouchableOpacity onPress={() => router.push("/find-id" as any)}>
+                <Text style={styles.linkText}>아이디 찾기</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => router.push("/find-password" as any)}
+              >
+                <Text style={styles.linkText}>비밀번호 찾기</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-
-        <Text style={styles.sectionLabel}>종</Text>
-        <View style={styles.row}>
-          <TouchableOpacity
-            style={[
-              styles.selectButton,
-              petType === "강아지" && styles.selectedButton,
-            ]}
-            onPress={() => setPetType("강아지")}
-          >
-            <Text
-              style={[
-                styles.selectText,
-                petType === "강아지" && styles.selectedText,
-              ]}
-            >
-              강아지
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[
-              styles.selectButton,
-              petType === "고양이" && styles.selectedButton,
-            ]}
-            onPress={() => setPetType("고양이")}
-          >
-            <Text
-              style={[
-                styles.selectText,
-                petType === "고양이" && styles.selectedText,
-              ]}
-            >
-              고양이
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={styles.button} onPress={handleNext}>
-          <Text style={styles.buttonText}>NEXT</Text>
-        </TouchableOpacity>
-      </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
-
-const BOX_HEIGHT = 68;
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: "#F6F7F4",
   },
+  flex: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    paddingHorizontal: 24,
     justifyContent: "center",
+    paddingHorizontal: 24,
   },
-  title: {
-    fontSize: 28,
-    marginBottom: 30,
-    textAlign: "center",
-    fontFamily: "NanumB",
+  logo: {
+    fontSize: 34,
     color: "#2F6B57",
+    textAlign: "center",
+    marginBottom: 40,
+    fontFamily: "KCC",
   },
   input: {
-    width: "100%",
-    height: BOX_HEIGHT,
+    height: 56,
     borderWidth: 1.5,
     borderColor: "#A9C3B7",
-    borderRadius: 18,
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    paddingHorizontal: 16,
     marginBottom: 14,
-    paddingHorizontal: 18,
-    backgroundColor: "#FFFFFF",
-    fontSize: 17,
-    fontFamily: "Nanum",
+    fontSize: 16,
     color: "#222",
-  },
-  sectionLabel: {
-    width: "100%",
-    fontSize: 16,
     fontFamily: "Nanum",
-    color: "#2F6B57",
-    marginBottom: 8,
-    marginTop: 4,
   },
-  row: {
-    flexDirection: "row",
-    gap: 12,
-    marginBottom: 14,
-  },
-  selectButton: {
-    flex: 1,
-    height: 60,
-    borderWidth: 1.5,
-    borderColor: "#A9C3B7",
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  selectedButton: {
-    backgroundColor: "#2F6B57",
-    borderColor: "#2F6B57",
-  },
-  selectText: {
-    fontSize: 16,
-    fontFamily: "Nanum",
-    color: "#2F6B57",
-  },
-  selectedText: {
-    color: "#FFFFFF",
-  },
-  button: {
-    width: "100%",
-    height: BOX_HEIGHT,
+  loginButton: {
+    height: 56,
+    borderRadius: 20,
     backgroundColor: "#2F6B57",
     justifyContent: "center",
     alignItems: "center",
-    borderRadius: 18,
-    marginTop: 8,
+    marginTop: 10,
+    marginBottom: 26,
   },
-  buttonText: {
-    color: "#fff",
+  loginButtonText: {
+    color: "#FFF",
     fontSize: 20,
+    fontFamily: "NanumB",
+  },
+  linkContainer: {
+    alignItems: "center",
+  },
+  topLinkRow: {
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  bottomLinkRow: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 48,
+  },
+  linkText: {
+    color: "#2F6B57",
+    fontSize: 16,
     fontFamily: "Nanum",
+    textDecorationLine: "underline",
   },
 });

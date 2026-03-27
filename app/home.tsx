@@ -20,23 +20,20 @@ const menuList = [
 
 export default function HomeScreen() {
   const router = useRouter();
-
   const lastBackPress = useRef(0);
 
-  // 🔥 뒤로가기 2번 눌러야 종료
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
         const now = Date.now();
 
         if (now - lastBackPress.current < 2000) {
-          BackHandler.exitApp(); // 앱 종료
+          BackHandler.exitApp();
           return true;
         }
 
         lastBackPress.current = now;
         ToastAndroid.show("한 번 더 누르면 종료됩니다", ToastAndroid.SHORT);
-
         return true;
       };
 
@@ -51,6 +48,16 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <View style={styles.header}>
+        <View style={styles.headerSpacer} />
+        <TouchableOpacity
+          style={styles.settingButton}
+          onPress={() => router.push("/settings" as any)}
+        >
+          <Ionicons name="settings-outline" size={22} color="#2F6B57" />
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.container}>
         <Text style={styles.logo}>PetFeed Planner</Text>
 
@@ -75,6 +82,25 @@ const styles = StyleSheet.create({
   safe: {
     flex: 1,
     backgroundColor: "#F6F7F4",
+  },
+  header: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 18,
+    paddingTop: 6,
+    paddingBottom: 4,
+  },
+  headerSpacer: {
+    flex: 1,
+  },
+  settingButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
   },
   container: {
     flex: 1,
