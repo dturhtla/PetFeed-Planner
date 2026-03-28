@@ -1,5 +1,10 @@
-import { GoogleGenerativeAI, type ChatSession, type GenerativeModel } from "@google/generative-ai";
+import { parseBrandRecommendationsFromModelText } from "@/utils/brandRecommendation";
 import { Ionicons } from "@expo/vector-icons";
+import {
+  GoogleGenerativeAI,
+  type ChatSession,
+  type GenerativeModel,
+} from "@google/generative-ai";
 import Constants from "expo-constants";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
@@ -17,9 +22,10 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import BrandRecommendationCard from "@/components/BrandRecommendationCard";
-import { parseBrandRecommendationsFromModelText } from "@/utils/brandRecommendation";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 
 let idCounter = 0;
 function nextId() {
@@ -56,15 +62,27 @@ BRAND_JSON:{"brandName":"Another Brand","species":"cat","benefits":["benefit one
  * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
  * we fall back to other models instead of only using flash-lite.
  */
-const TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] as const;
-const VISION_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] as const;
+const TEXT_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+] as const;
+const VISION_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+] as const;
 
 function isQuotaOrRateLimitError(err: unknown): boolean {
   const e = err as { status?: number; message?: string };
   const msg = (e?.message || "").toLowerCase();
-  return e?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("resource exhausted");
+  return (
+    e?.status === 429 ||
+    msg.includes("429") ||
+    msg.includes("quota") ||
+    msg.includes("resource exhausted")
+  );
 }
-
 
 const PET_PHOTO_ANALYSIS_INSTRUCTION = `You analyze pet photos for a Pet Health Assistant app. Reply in plain text only (no markdown, no **). Be concise.
 
@@ -98,7 +116,10 @@ function guessMimeType(uri: string) {
   return "image/jpeg";
 }
 
-async function imageToBase64(uri: string, existingBase64: string | null | undefined) {
+async function imageToBase64(
+  uri: string,
+  existingBase64: string | null | undefined,
+) {
   if (existingBase64) return existingBase64;
   return FileSystem.readAsStringAsync(uri, { encoding: "base64" });
 }
@@ -106,8 +127,11 @@ async function imageToBase64(uri: string, existingBase64: string | null | undefi
 /** Metro inlines EXPO_PUBLIC_*; app.config.js also sets extra.geminiApiKey from .env as a fallback. */
 function getGeminiApiKey(): string {
   const fromEnv = (process.env.EXPO_PUBLIC_GEMINI_API_KEY || "").trim();
-  const extra = Constants.expoConfig?.extra as { geminiApiKey?: string } | undefined;
-  const fromExtra = typeof extra?.geminiApiKey === "string" ? extra.geminiApiKey.trim() : "";
+  const extra = Constants.expoConfig?.extra as
+    | { geminiApiKey?: string }
+    | undefined;
+  const fromExtra =
+    typeof extra?.geminiApiKey === "string" ? extra.geminiApiKey.trim() : "";
   return fromEnv || fromExtra;
 }
 
@@ -143,7 +167,8 @@ export default function ChatbotScreen() {
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const modelName = TEXT_MODELS[textModelIndexRef.current] ?? TEXT_MODELS[0];
+      const modelName =
+        TEXT_MODELS[textModelIndexRef.current] ?? TEXT_MODELS[0];
       modelRef.current = genAI.getGenerativeModel({
         model: modelName,
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -173,9 +198,14 @@ export default function ChatbotScreen() {
     return chatSessionRef.current!;
   };
 
-  const analyzePetPhotoWithGemini = async (base64: string, mimeType: string) => {
+  const analyzePetPhotoWithGemini = async (
+    base64: string,
+    mimeType: string,
+  ) => {
     if (!apiKey || apiKey === "your_gemini_api_key_here") {
-      throw new Error("Gemini API key missing. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file.");
+      throw new Error(
+        "Gemini API key missing. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file.",
+      );
     }
     const genAI = new GoogleGenerativeAI(apiKey);
     const parts = [
@@ -264,7 +294,10 @@ export default function ChatbotScreen() {
       const msg =
         e?.message ||
         "Could not analyze the photo. Check your API key, free-tier limits, and network.";
-      setMessages((prev) => [...prev, { id: nextId(), role: "error", content: msg }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: "error", content: msg },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -274,7 +307,10 @@ export default function ChatbotScreen() {
     try {
       const cam = await ImagePicker.requestCameraPermissionsAsync();
       if (!cam.granted) {
-        Alert.alert("Permission needed", "Allow camera access to photograph your pet.");
+        Alert.alert(
+          "Permission needed",
+          "Allow camera access to photograph your pet.",
+        );
         return;
       }
       const picked = await ImagePicker.launchCameraAsync(imagePickerOptions);
@@ -296,10 +332,14 @@ export default function ChatbotScreen() {
     try {
       const lib = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!lib.granted) {
-        Alert.alert("Permission needed", "Allow photo library access to choose a pet image.");
+        Alert.alert(
+          "Permission needed",
+          "Allow photo library access to choose a pet image.",
+        );
         return;
       }
-      const picked = await ImagePicker.launchImageLibraryAsync(imagePickerOptions);
+      const picked =
+        await ImagePicker.launchImageLibraryAsync(imagePickerOptions);
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
       await runAnalyzeOnPickedImage(
@@ -384,7 +424,10 @@ export default function ChatbotScreen() {
     if (!text || isLoading) return;
 
     setInput("");
-    setMessages((prev) => [...prev, { id: nextId(), role: "user", content: text }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: nextId(), role: "user", content: text },
+    ]);
     setIsLoading(true);
 
     try {
@@ -420,10 +463,18 @@ export default function ChatbotScreen() {
         throw new Error("No response from Gemini.");
       }
 
-      setMessages((prev) => [...prev, { id: nextId(), role: "assistant", content: aiText }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: "assistant", content: aiText },
+      ]);
     } catch (err: unknown) {
       console.error("Gemini API error:", err);
-      const e = err as { status?: number; statusText?: string; message?: string; errorDetails?: unknown };
+      const e = err as {
+        status?: number;
+        statusText?: string;
+        message?: string;
+        errorDetails?: unknown;
+      };
       let errorMessage = e?.message || "Unknown error";
       if (isQuotaOrRateLimitError(err)) {
         const retrySec = /retry in ([\d.]+)s/i.exec(errorMessage)?.[1];
@@ -431,10 +482,15 @@ export default function ChatbotScreen() {
           ? `요청 한도에 도달했습니다. ${Math.ceil(Number(retrySec))}초 후 다시 시도하거나, 내일 다시 시도해 주세요. (무료 플랜은 모델·일별 한도가 있습니다.)`
           : "Gemini 무료 한도를 초과했습니다. 잠시 후 다시 시도하거나 Google AI Studio에서 사용량을 확인해 주세요.";
       } else if (e?.status) {
-        const details = e?.errorDetails ? ` ${JSON.stringify(e.errorDetails)}` : "";
+        const details = e?.errorDetails
+          ? ` ${JSON.stringify(e.errorDetails)}`
+          : "";
         errorMessage = `API Error ${e.status}: ${e.statusText || e.message}${details}`;
       }
-      setMessages((prev) => [...prev, { id: nextId(), role: "error", content: errorMessage }]);
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: "error", content: errorMessage },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -446,9 +502,14 @@ export default function ChatbotScreen() {
         <View style={[styles.messageRow, styles.messageRowUser]}>
           <View style={[styles.messageBubble, styles.messageBubbleUser]}>
             {item.imageUri ? (
-              <Image source={{ uri: item.imageUri }} style={styles.userPhotoThumb} />
+              <Image
+                source={{ uri: item.imageUri }}
+                style={styles.userPhotoThumb}
+              />
             ) : (
-              <Text style={[styles.messageText, styles.messageTextUser]}>{item.content}</Text>
+              <Text style={[styles.messageText, styles.messageTextUser]}>
+                {item.content}
+              </Text>
             )}
           </View>
         </View>
@@ -465,17 +526,22 @@ export default function ChatbotScreen() {
       );
     }
 
-    const { caption, brands } = parseBrandRecommendationsFromModelText(item.content);
+    const { caption, brands } = parseBrandRecommendationsFromModelText(
+      item.content,
+    );
 
     if (brands.length > 0) {
       return (
         <View style={[styles.messageRow, styles.messageRowAssistant]}>
           <View style={styles.modelBlock}>
-            {caption ? <Text style={styles.modelCaption}>{caption}</Text> : null}
+            {caption ? (
+              <Text style={styles.modelCaption}>{caption}</Text>
+            ) : null}
             {brands.map((b, i) => (
-              <View key={`${b.brandName}-${i}`} style={styles.brandCardWrap}>
-                <BrandRecommendationCard brandName={b.brandName} species={b.species} benefits={b.benefits} />
-              </View>
+              <View
+                key={`${b.brandName}-${i}`}
+                style={styles.brandCardWrap}
+              ></View>
             ))}
           </View>
         </View>
@@ -514,9 +580,10 @@ export default function ChatbotScreen() {
               </View>
             </View>
             <Text style={styles.title}>AI 펫 건강 도우미</Text>
-            <Text style={styles.subtitle}>
-              급여, 행동, 건강에 대해 물어보세요. 사진으로 반려동물을 분석할 수도 있어요.
-            </Text>
+
+            {/* <Text style={styles.subtitle}>
+              급여, 행동, 건강에 대해 물어보세요
+            </Text>*/}
           </View>
 
           <FlatList
@@ -530,13 +597,13 @@ export default function ChatbotScreen() {
             contentContainerStyle={styles.messagesContent}
             keyboardShouldPersistTaps="handled"
             keyboardDismissMode="interactive"
-            ListEmptyComponent={
+            /* ListEmptyComponent={
               <Text style={styles.emptyHint}>
                 {apiKey
                   ? "메시지를 입력하거나 사진 버튼으로 반려동물 사진을 보내보세요."
                   : "프로젝트 루트에 .env 파일을 만들고 EXPO_PUBLIC_GEMINI_API_KEY를 설정한 뒤 Expo를 다시 시작하세요."}
               </Text>
-            }
+            }*/
             ListFooterComponent={
               isLoading ? (
                 <View style={[styles.messageRow, styles.messageRowAssistant]}>
