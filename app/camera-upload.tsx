@@ -42,7 +42,7 @@ export default function CameraUploadScreen() {
       router.push({
         pathname: "/analysis-result",
         params: { imageUri: photo.uri },
-      } as any);
+      });
     } catch (error) {
       console.log(error);
     } finally {

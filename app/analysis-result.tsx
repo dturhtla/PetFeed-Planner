@@ -11,7 +11,14 @@ const nutrition = [
 ];
 
 export default function AnalysisResultScreen() {
-  const { imageUri } = useLocalSearchParams<{ imageUri?: string }>();
+  const params = useLocalSearchParams();
+  const imageUri = Array.isArray(params.imageUri)
+    ? params.imageUri[0]
+    : params.imageUri;
+
+  if (!imageUri) {
+    return <Text>이미지가 없습니다</Text>;
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
