@@ -43,7 +43,7 @@ app-example
 /android
 
 #feed-recommend
-.env
+#.env
 venv/
 __pycache__/
 *.pyc
