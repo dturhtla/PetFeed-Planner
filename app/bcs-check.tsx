@@ -12,11 +12,21 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
+type GenderType = "남" | "여" | "";
 
 type LoggedInUser = {
   id: string;
   email: string;
   password: string;
+};
+
+type ProfileDraftData = {
+  name?: string;
+  age?: string;
+  weight?: string;
+  gender?: GenderType;
+  petType?: PetType;
+  bcs?: BcsLabel;
 };
 
 const dogBcsList = [
@@ -90,21 +100,32 @@ export default function BcsCheckScreen() {
         setUserEmail(email);
 
         const savedProfile = await AsyncStorage.getItem(`petProfile_${email}`);
-        const parsed = savedProfile ? JSON.parse(savedProfile) : {};
+        const savedDraft = await AsyncStorage.getItem(
+          `petProfileDraft_${email}`,
+        );
 
-        if (params?.petType && typeof params.petType === "string") {
-          setPetType(params.petType as PetType);
-        } else {
-          setPetType(parsed.petType || "");
-        }
+        const parsedProfile: ProfileDraftData = savedProfile
+          ? JSON.parse(savedProfile)
+          : {};
+        const parsedDraft: ProfileDraftData = savedDraft
+          ? JSON.parse(savedDraft)
+          : {};
+
+        const finalPetType =
+          params?.petType && typeof params.petType === "string"
+            ? (params.petType as PetType)
+            : parsedDraft.petType || parsedProfile.petType || "";
+
+        setPetType(finalPetType);
 
         if (params?.selectedBcs && typeof params.selectedBcs === "string") {
           setSelectedBcs(params.selectedBcs as BcsLabel);
         } else {
-          setSelectedBcs(parsed.bcs || "");
+          setSelectedBcs(parsedDraft.bcs || parsedProfile.bcs || "");
         }
       } catch (error) {
         console.log(error);
+        Alert.alert("오류", "BCS 정보를 불러오는 중 문제가 발생했습니다.");
       }
     };
 
@@ -121,17 +142,6 @@ export default function BcsCheckScreen() {
       return;
     }
 
-    if (params?.from === "profile") {
-      router.replace({
-        pathname: "/profile",
-        params: {
-          selectedBcs,
-          fromBcsEdit: "true",
-        },
-      } as any);
-      return;
-    }
-
     try {
       if (!userEmail) {
         Alert.alert("오류", "로그인 정보가 없습니다.");
@@ -139,24 +149,57 @@ export default function BcsCheckScreen() {
         return;
       }
 
-      const savedProfile = await AsyncStorage.getItem(
-        `petProfile_${userEmail}`,
-      );
-      const parsed = savedProfile ? JSON.parse(savedProfile) : {};
+      const draftKey = `petProfileDraft_${userEmail}`;
+      const profileKey = `petProfile_${userEmail}`;
+      const completedKey = `profileCompleted_${userEmail}`;
 
-      await AsyncStorage.setItem(
-        `petProfile_${userEmail}`,
-        JSON.stringify({
-          ...parsed,
-          bcs: selectedBcs,
-        }),
-      );
+      const savedDraft = await AsyncStorage.getItem(draftKey);
+      const parsedDraft: ProfileDraftData = savedDraft
+        ? JSON.parse(savedDraft)
+        : {};
 
-      await AsyncStorage.setItem(`profileCompleted_${userEmail}`, "true");
+      const updatedProfile: ProfileDraftData = {
+        ...parsedDraft,
+        petType,
+        bcs: selectedBcs,
+      };
+
+      // 프로필 수정 화면에서 들어온 경우 → 프로필 화면으로 복귀
+      if (params?.from === "profile") {
+        await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
+
+        router.replace({
+          pathname: "/profile",
+          params: {
+            selectedBcs,
+            fromBcsEdit: "true",
+          },
+        } as any);
+        return;
+      }
+
+      // 처음 프로필 입력인 경우 → 정보 저장 후 메인화면 이동
+      if (
+        !updatedProfile.name ||
+        !updatedProfile.age ||
+        !updatedProfile.weight ||
+        !updatedProfile.gender ||
+        !updatedProfile.petType ||
+        !updatedProfile.bcs
+      ) {
+        Alert.alert("알림", "프로필 정보가 완전하지 않습니다.");
+        router.replace("/profile" as any);
+        return;
+      }
+
+      await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
+      await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
+      await AsyncStorage.setItem(completedKey, "true");
+
       router.replace("/home" as any);
     } catch (error) {
       console.log(error);
-      Alert.alert("오류", "저장 중 오류가 발생했습니다.");
+      Alert.alert("오류", "BCS 저장 중 오류가 발생했습니다.");
     }
   };
 
@@ -178,7 +221,12 @@ export default function BcsCheckScreen() {
               style={[styles.bcsCard, isSelected && styles.selectedCard]}
               onPress={() => setSelectedBcs(item.label as BcsLabel)}
             >
-              <Text style={[styles.bcsText, isSelected && styles.selectedText]}>
+              <Text
+                style={[
+                  styles.bcsDescription,
+                  isSelected && styles.selectedText,
+                ]}
+              >
                 {item.text}
               </Text>
             </TouchableOpacity>
@@ -233,10 +281,11 @@ const styles = StyleSheet.create({
   selectedCard: {
     backgroundColor: "#2F6B57",
   },
-  bcsText: {
+  bcsDescription: {
     fontSize: 14,
     lineHeight: 22,
     color: "#222",
+    fontFamily: "Nanum",
   },
   selectedText: {
     color: "#FFFFFF",

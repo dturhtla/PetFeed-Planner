@@ -10,10 +10,10 @@ export default function RootLayout() {
   });
 
   if (error) {
-    console.log("폰트 로딩 에러:", error);
+    console.log("로딩 에러:", error);
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <Text>폰트 로딩 에러</Text>
+        <Text>로딩 에러</Text>
       </View>
     );
   }
@@ -29,6 +29,9 @@ export default function RootLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
+      <Stack.Screen name="signup" />
+      <Stack.Screen name="find-id" />
+      <Stack.Screen name="find-password" />
       <Stack.Screen name="bcs-check" />
       <Stack.Screen name="home" />
       <Stack.Screen name="profile" />
@@ -37,6 +40,9 @@ export default function RootLayout() {
       <Stack.Screen name="analysis-result" />
       <Stack.Screen name="chatbot" />
       <Stack.Screen name="records" />
+      <Stack.Screen name="settings" />
+      <Stack.Screen name="delete-account" />
+      <Stack.Screen name="modal" />
     </Stack>
   );
 }

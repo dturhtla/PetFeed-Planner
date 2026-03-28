@@ -1,3 +1,4 @@
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -23,6 +24,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
     try {
@@ -85,14 +87,27 @@ export default function LoginScreen() {
             autoCapitalize="none"
           />
 
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호"
-            placeholderTextColor="#777"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
+          <View style={styles.passwordWrapper}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="비밀번호"
+              placeholderTextColor="#777"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+            />
+            <TouchableOpacity
+              onPress={() => setShowPassword((prev) => !prev)}
+              style={styles.eyeButton}
+            >
+              <Ionicons
+                name={showPassword ? "eye-off" : "eye"}
+                size={22}
+                color="#666"
+              />
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
             <Text style={styles.loginButtonText}>로그인</Text>
@@ -154,6 +169,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#222",
     fontFamily: "Nanum",
+  },
+  passwordWrapper: {
+    height: 56,
+    borderWidth: 1.5,
+    borderColor: "#A9C3B7",
+    backgroundColor: "#FFF",
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  passwordInput: {
+    flex: 1,
+    fontSize: 16,
+    color: "#222",
+    fontFamily: "Nanum",
+  },
+  eyeButton: {
+    paddingLeft: 12,
   },
   loginButton: {
     height: 56,

@@ -12,6 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+const BOX_HEIGHT = 60;
+
 type User = {
   id: string;
   email: string;
@@ -108,7 +110,7 @@ const styles = StyleSheet.create({
     fontFamily: "NanumB",
   },
   input: {
-    height: 60,
+    height: BOX_HEIGHT,
     borderWidth: 1.5,
     borderColor: "#B6CEC4",
     backgroundColor: "#FFF",
@@ -120,8 +122,8 @@ const styles = StyleSheet.create({
     fontFamily: "Nanum",
   },
   button: {
-    height: 64,
-    borderRadius: 20,
+    height: BOX_HEIGHT,
+    borderRadius: 18,
     backgroundColor: "#2F6B57",
     justifyContent: "center",
     alignItems: "center",
