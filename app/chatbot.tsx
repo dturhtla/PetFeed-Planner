@@ -52,7 +52,19 @@ BRAND_JSON:{"brandName":"Another Brand","species":"cat","benefits":["benefit one
 - species must be exactly "dog" or "cat" matching the animal. For rabbits or other species, describe food in plain text only — do NOT use BRAND_JSON.
 - benefits must be a JSON array of short strings (nutritional selling points).`;
 
-const GEMINI_MODEL = "gemini-2.5-flash-lite";
+/**
+ * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
+ * we fall back to other models instead of only using flash-lite.
+ */
+const TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] as const;
+const VISION_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"] as const;
+
+function isQuotaOrRateLimitError(err: unknown): boolean {
+  const e = err as { status?: number; message?: string };
+  const msg = (e?.message || "").toLowerCase();
+  return e?.status === 429 || msg.includes("429") || msg.includes("quota") || msg.includes("resource exhausted");
+}
+
 
 const PET_PHOTO_ANALYSIS_INSTRUCTION = `You analyze pet photos for a Pet Health Assistant app. Reply in plain text only (no markdown, no **). Be concise.
 
@@ -107,6 +119,8 @@ export default function ChatbotScreen() {
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const chatSessionRef = useRef<ChatSession | null>(null);
   const modelRef = useRef<GenerativeModel | null>(null);
+  /** Which TEXT_MODELS entry is used for the active chat session (advance on 429 / quota). */
+  const textModelIndexRef = useRef(0);
 
   const apiKey = getGeminiApiKey();
 
@@ -129,8 +143,9 @@ export default function ChatbotScreen() {
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
+      const modelName = TEXT_MODELS[textModelIndexRef.current] ?? TEXT_MODELS[0];
       modelRef.current = genAI.getGenerativeModel({
-        model: GEMINI_MODEL,
+        model: modelName,
         systemInstruction: SYSTEM_INSTRUCTION,
         generationConfig: { maxOutputTokens: 512 },
       });
@@ -185,24 +200,27 @@ export default function ChatbotScreen() {
       return result.response.text();
     };
 
-    try {
-      return await tryGenerate(GEMINI_MODEL);
-    } catch (firstErr: unknown) {
-      const err = firstErr as { status?: number; message?: string };
-      const msg = err?.message || "";
-      const is429 =
-        err?.status === 429 || msg.includes("429") || msg.includes("quota");
-      const isLiteVisionUnsupported =
-        msg.includes("400") &&
-        (msg.toLowerCase().includes("multimodal") ||
-          msg.toLowerCase().includes("image") ||
-          msg.toLowerCase().includes("not supported"));
-
-      if (is429 || isLiteVisionUnsupported) {
-        return await tryGenerate("gemini-2.5-flash");
+    let lastErr: unknown;
+    for (const modelName of VISION_MODELS) {
+      try {
+        return await tryGenerate(modelName);
+      } catch (err: unknown) {
+        lastErr = err;
+        const e = err as { status?: number; message?: string };
+        const msg = e?.message || "";
+        const isQuota = isQuotaOrRateLimitError(err);
+        const isLiteVisionUnsupported =
+          msg.includes("400") &&
+          (msg.toLowerCase().includes("multimodal") ||
+            msg.toLowerCase().includes("image") ||
+            msg.toLowerCase().includes("not supported"));
+        if (isQuota || isLiteVisionUnsupported) {
+          continue;
+        }
+        throw err;
       }
-      throw firstErr;
     }
+    throw lastErr ?? new Error("Vision model requests failed.");
   };
 
   const imagePickerOptions: ImagePicker.ImagePickerOptions = {
@@ -370,17 +388,49 @@ export default function ChatbotScreen() {
     setIsLoading(true);
 
     try {
-      const chat = getOrCreateChatSession();
-      const result = await chat.sendMessage(text);
-      const response = result.response;
-      const aiText = response.text();
+      const attemptSend = async () => {
+        const chat = getOrCreateChatSession();
+        const result = await chat.sendMessage(text);
+        return result.response.text();
+      };
+
+      let aiText: string | undefined;
+      let i = textModelIndexRef.current;
+
+      while (i < TEXT_MODELS.length) {
+        try {
+          aiText = await attemptSend();
+          textModelIndexRef.current = i;
+          break;
+        } catch (err: unknown) {
+          if (!isQuotaOrRateLimitError(err)) {
+            throw err;
+          }
+          if (i >= TEXT_MODELS.length - 1) {
+            throw err;
+          }
+          i += 1;
+          textModelIndexRef.current = i;
+          modelRef.current = null;
+          chatSessionRef.current = null;
+        }
+      }
+
+      if (aiText == null) {
+        throw new Error("No response from Gemini.");
+      }
 
       setMessages((prev) => [...prev, { id: nextId(), role: "assistant", content: aiText }]);
     } catch (err: unknown) {
       console.error("Gemini API error:", err);
       const e = err as { status?: number; statusText?: string; message?: string; errorDetails?: unknown };
       let errorMessage = e?.message || "Unknown error";
-      if (e?.status) {
+      if (isQuotaOrRateLimitError(err)) {
+        const retrySec = /retry in ([\d.]+)s/i.exec(errorMessage)?.[1];
+        errorMessage = retrySec
+          ? `요청 한도에 도달했습니다. ${Math.ceil(Number(retrySec))}초 후 다시 시도하거나, 내일 다시 시도해 주세요. (무료 플랜은 모델·일별 한도가 있습니다.)`
+          : "Gemini 무료 한도를 초과했습니다. 잠시 후 다시 시도하거나 Google AI Studio에서 사용량을 확인해 주세요.";
+      } else if (e?.status) {
         const details = e?.errorDetails ? ` ${JSON.stringify(e.errorDetails)}` : "";
         errorMessage = `API Error ${e.status}: ${e.statusText || e.message}${details}`;
       }
