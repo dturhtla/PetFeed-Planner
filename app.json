@@ -17,13 +17,10 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-<<<<<<< HEAD
-      "predictiveBackGestureEnabled": false
-=======
+
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize"
->>>>>>> ee5dbb6ff33c2e73c9e74851b9976df5cfb93fb4
     },
     "web": {
       "output": "static",
