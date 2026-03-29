@@ -1,31 +1,24 @@
-import { parseBrandRecommendationsFromModelText } from "@/utils/brandRecommendation";
-import { Ionicons } from "@expo/vector-icons";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
-  GoogleGenerativeAI,
-  type ChatSession,
-  type GenerativeModel,
-} from "@google/generative-ai";
-import Constants from "expo-constants";
-import * as DocumentPicker from "expo-document-picker";
-import * as FileSystem from "expo-file-system/legacy";
-import * as ImagePicker from "expo-image-picker";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  Alert,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
+  View,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  FlatList,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  Image,
+  Alert,
 } from "react-native";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import * as DocumentPicker from "expo-document-picker";
+import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system";
+import { Ionicons } from "@expo/vector-icons";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import BrandRecommendationCard from "./BrandRecommendationCard";
+import { parseBrandRecommendationsFromModelText } from "../utils/brandRecommendation";
 
 let idCounter = 0;
 function nextId() {
@@ -58,31 +51,8 @@ BRAND_JSON:{"brandName":"Another Brand","species":"cat","benefits":["benefit one
 - species must be exactly "dog" or "cat" matching the animal. For rabbits or other species, describe food in plain text only — do NOT use BRAND_JSON.
 - benefits must be a JSON array of short strings (nutritional selling points).`;
 
-/**
- * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
- * we fall back to other models instead of only using flash-lite.
- */
-const TEXT_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-] as const;
-const VISION_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-] as const;
-
-function isQuotaOrRateLimitError(err: unknown): boolean {
-  const e = err as { status?: number; message?: string };
-  const msg = (e?.message || "").toLowerCase();
-  return (
-    e?.status === 429 ||
-    msg.includes("429") ||
-    msg.includes("quota") ||
-    msg.includes("resource exhausted")
-  );
-}
+/** Same model as text chat — shares your Gemini free-tier quota. Avoid gemini-2.0-flash: many keys get limit 0 on free tier for that model. */
+const GEMINI_MODEL = "gemini-2.5-flash-lite";
 
 const PET_PHOTO_ANALYSIS_INSTRUCTION = `You analyze pet photos for a Pet Health Assistant app. Reply in plain text only (no markdown, no **). Be concise.
 
@@ -99,16 +69,7 @@ When the image does NOT show a pet (food, objects, people only, scenery, etc.):
 - Invite them to share a photo of their pet or type a question about their dog, cat, rabbit, or similar pet.
 - Do not give a full pet breed/age analysis for a non-pet image.`;
 
-type MessageRole = "user" | "assistant" | "error";
-
-type ChatMessage = {
-  id: string;
-  role: MessageRole;
-  content?: string;
-  imageUri?: string;
-};
-
-function guessMimeType(uri: string) {
+function guessMimeType(uri) {
   const lower = (uri || "").toLowerCase();
   if (lower.includes(".png")) return "image/png";
   if (lower.includes(".webp")) return "image/webp";
@@ -116,37 +77,24 @@ function guessMimeType(uri: string) {
   return "image/jpeg";
 }
 
-async function imageToBase64(
-  uri: string,
-  existingBase64: string | null | undefined,
-) {
+async function imageToBase64(uri, existingBase64) {
   if (existingBase64) return existingBase64;
-  return FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+  const data = await FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  return data;
 }
 
-/** Metro inlines EXPO_PUBLIC_*; app.config.js also sets extra.geminiApiKey from .env as a fallback. */
-function getGeminiApiKey(): string {
-  const fromEnv = (process.env.EXPO_PUBLIC_GEMINI_API_KEY || "").trim();
-  const extra = Constants.expoConfig?.extra as
-    | { geminiApiKey?: string }
-    | undefined;
-  const fromExtra =
-    typeof extra?.geminiApiKey === "string" ? extra.geminiApiKey.trim() : "";
-  return fromEnv || fromExtra;
-}
-
-export default function ChatbotScreen() {
+function PetHealthChat() {
   const insets = useSafeAreaInsets();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const listRef = useRef<FlatList<ChatMessage>>(null);
-  const chatSessionRef = useRef<ChatSession | null>(null);
-  const modelRef = useRef<GenerativeModel | null>(null);
-  /** Which TEXT_MODELS entry is used for the active chat session (advance on 429 / quota). */
-  const textModelIndexRef = useRef(0);
+  const listRef = useRef(null);
+  const chatSessionRef = useRef(null);
+  const modelRef = useRef(null);
 
-  const apiKey = getGeminiApiKey();
+  const apiKey = (process.env.EXPO_PUBLIC_GEMINI_API_KEY || "").trim();
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -162,15 +110,13 @@ export default function ChatbotScreen() {
     if (!modelRef.current) {
       if (!apiKey || apiKey === "your_gemini_api_key_here") {
         throw new Error(
-          "Gemini API key missing. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file, then restart Expo.",
+          "Gemini API key missing. Make sure EXPO_PUBLIC_GEMINI_API_KEY is set in your .env before running `npm start`.",
         );
       }
 
       const genAI = new GoogleGenerativeAI(apiKey);
-      const modelName =
-        TEXT_MODELS[textModelIndexRef.current] ?? TEXT_MODELS[0];
       modelRef.current = genAI.getGenerativeModel({
-        model: modelName,
+        model: GEMINI_MODEL,
         systemInstruction: SYSTEM_INSTRUCTION,
         generationConfig: { maxOutputTokens: 512 },
       });
@@ -185,7 +131,7 @@ export default function ChatbotScreen() {
                 ? " "
                 : "";
           return {
-            role: m.role === "user" ? ("user" as const) : ("model" as const),
+            role: m.role === "user" ? "user" : "model",
             parts: [{ text: textForModel }],
           };
         });
@@ -195,16 +141,13 @@ export default function ChatbotScreen() {
       });
     }
 
-    return chatSessionRef.current!;
+    return chatSessionRef.current;
   };
 
-  const analyzePetPhotoWithGemini = async (
-    base64: string,
-    mimeType: string,
-  ) => {
+  const analyzePetPhotoWithGemini = async (base64, mimeType) => {
     if (!apiKey || apiKey === "your_gemini_api_key_here") {
       throw new Error(
-        "Gemini API key missing. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file.",
+        "Gemini API key missing. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env.",
       );
     }
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -220,7 +163,7 @@ export default function ChatbotScreen() {
       },
     ];
 
-    const tryGenerate = async (modelName: string) => {
+    const tryGenerate = async (modelName) => {
       const m = genAI.getGenerativeModel({
         model: modelName,
         systemInstruction: PET_PHOTO_ANALYSIS_INSTRUCTION,
@@ -230,30 +173,28 @@ export default function ChatbotScreen() {
       return result.response.text();
     };
 
-    let lastErr: unknown;
-    for (const modelName of VISION_MODELS) {
-      try {
-        return await tryGenerate(modelName);
-      } catch (err: unknown) {
-        lastErr = err;
-        const e = err as { status?: number; message?: string };
-        const msg = e?.message || "";
-        const isQuota = isQuotaOrRateLimitError(err);
-        const isLiteVisionUnsupported =
-          msg.includes("400") &&
-          (msg.toLowerCase().includes("multimodal") ||
-            msg.toLowerCase().includes("image") ||
-            msg.toLowerCase().includes("not supported"));
-        if (isQuota || isLiteVisionUnsupported) {
-          continue;
-        }
-        throw err;
+    try {
+      return await tryGenerate(GEMINI_MODEL);
+    } catch (firstErr) {
+      const msg = firstErr?.message || "";
+      const is429 =
+        firstErr?.status === 429 ||
+        msg.includes("429") ||
+        msg.includes("quota");
+      const isLiteVisionUnsupported =
+        msg.includes("400") &&
+        (msg.toLowerCase().includes("multimodal") ||
+          msg.toLowerCase().includes("image") ||
+          msg.toLowerCase().includes("not supported"));
+
+      if (is429 || isLiteVisionUnsupported) {
+        return await tryGenerate("gemini-2.5-flash");
       }
+      throw firstErr;
     }
-    throw lastErr ?? new Error("Vision model requests failed.");
   };
 
-  const imagePickerOptions: ImagePicker.ImagePickerOptions = {
+  const imagePickerOptions = {
     mediaTypes: ["images"],
     quality: 0.75,
     base64: true,
@@ -261,11 +202,7 @@ export default function ChatbotScreen() {
     aspect: [4, 3],
   };
 
-  const runAnalyzeOnPickedImage = async (
-    uri: string,
-    mimeType: string,
-    base64FromPicker: string | null | undefined,
-  ) => {
+  const runAnalyzeOnPickedImage = async (uri, mimeType, base64FromPicker) => {
     let b64 = base64FromPicker;
     if (!b64) {
       b64 = await imageToBase64(uri, null);
@@ -288,11 +225,10 @@ export default function ChatbotScreen() {
         ...prev,
         { id: nextId(), role: "assistant", content: analysis },
       ]);
-    } catch (err: unknown) {
+    } catch (err) {
       console.error("Pet photo analysis error:", err);
-      const e = err as { message?: string };
       const msg =
-        e?.message ||
+        err?.message ||
         "Could not analyze the photo. Check your API key, free-tier limits, and network.";
       setMessages((prev) => [
         ...prev,
@@ -321,10 +257,9 @@ export default function ChatbotScreen() {
         asset.mimeType || guessMimeType(asset.uri),
         asset.base64,
       );
-    } catch (err: unknown) {
+    } catch (err) {
       console.error(err);
-      const e = err as { message?: string };
-      Alert.alert("Camera", e?.message || "Could not use the camera.");
+      Alert.alert("Camera", err?.message || "Could not use the camera.");
     }
   };
 
@@ -338,8 +273,7 @@ export default function ChatbotScreen() {
         );
         return;
       }
-      const picked =
-        await ImagePicker.launchImageLibraryAsync(imagePickerOptions);
+      const picked = await ImagePicker.launchImageLibraryAsync(imagePickerOptions);
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
       await runAnalyzeOnPickedImage(
@@ -347,10 +281,9 @@ export default function ChatbotScreen() {
         asset.mimeType || guessMimeType(asset.uri),
         asset.base64,
       );
-    } catch (err: unknown) {
+    } catch (err) {
       console.error(err);
-      const e = err as { message?: string };
-      Alert.alert("Photo library", e?.message || "Could not open photos.");
+      Alert.alert("Photo library", err?.message || "Could not open photos.");
     }
   };
 
@@ -367,10 +300,9 @@ export default function ChatbotScreen() {
         file.mimeType || guessMimeType(file.name || file.uri),
         file.base64 ?? null,
       );
-    } catch (err: unknown) {
+    } catch (err) {
       console.error(err);
-      const e = err as { message?: string };
-      Alert.alert("Files", e?.message || "Could not open the file picker.");
+      Alert.alert("Files", err?.message || "Could not open the file picker.");
     }
   };
 
@@ -431,61 +363,23 @@ export default function ChatbotScreen() {
     setIsLoading(true);
 
     try {
-      const attemptSend = async () => {
-        const chat = getOrCreateChatSession();
-        const result = await chat.sendMessage(text);
-        return result.response.text();
-      };
-
-      let aiText: string | undefined;
-      let i = textModelIndexRef.current;
-
-      while (i < TEXT_MODELS.length) {
-        try {
-          aiText = await attemptSend();
-          textModelIndexRef.current = i;
-          break;
-        } catch (err: unknown) {
-          if (!isQuotaOrRateLimitError(err)) {
-            throw err;
-          }
-          if (i >= TEXT_MODELS.length - 1) {
-            throw err;
-          }
-          i += 1;
-          textModelIndexRef.current = i;
-          modelRef.current = null;
-          chatSessionRef.current = null;
-        }
-      }
-
-      if (aiText == null) {
-        throw new Error("No response from Gemini.");
-      }
+      const chat = getOrCreateChatSession();
+      const result = await chat.sendMessage(text);
+      const response = result.response;
+      const aiText = response.text();
 
       setMessages((prev) => [
         ...prev,
         { id: nextId(), role: "assistant", content: aiText },
       ]);
-    } catch (err: unknown) {
+    } catch (err) {
       console.error("Gemini API error:", err);
-      const e = err as {
-        status?: number;
-        statusText?: string;
-        message?: string;
-        errorDetails?: unknown;
-      };
-      let errorMessage = e?.message || "Unknown error";
-      if (isQuotaOrRateLimitError(err)) {
-        const retrySec = /retry in ([\d.]+)s/i.exec(errorMessage)?.[1];
-        errorMessage = retrySec
-          ? `요청 한도에 도달했습니다. ${Math.ceil(Number(retrySec))}초 후 다시 시도하거나, 내일 다시 시도해 주세요. (무료 플랜은 모델·일별 한도가 있습니다.)`
-          : "Gemini 무료 한도를 초과했습니다. 잠시 후 다시 시도하거나 Google AI Studio에서 사용량을 확인해 주세요.";
-      } else if (e?.status) {
-        const details = e?.errorDetails
-          ? ` ${JSON.stringify(e.errorDetails)}`
+      let errorMessage = err?.message || "Unknown error";
+      if (err?.status) {
+        const details = err?.errorDetails
+          ? ` ${JSON.stringify(err.errorDetails)}`
           : "";
-        errorMessage = `API Error ${e.status}: ${e.statusText || e.message}${details}`;
+        errorMessage = `API Error ${err.status}: ${err.statusText || err.message}${details}`;
       }
       setMessages((prev) => [
         ...prev,
@@ -496,7 +390,7 @@ export default function ChatbotScreen() {
     }
   };
 
-  const renderMessage = useCallback(({ item }: { item: ChatMessage }) => {
+  const renderMessage = useCallback(({ item }) => {
     if (item.role === "user") {
       return (
         <View style={[styles.messageRow, styles.messageRowUser]}>
@@ -538,10 +432,13 @@ export default function ChatbotScreen() {
               <Text style={styles.modelCaption}>{caption}</Text>
             ) : null}
             {brands.map((b, i) => (
-              <View
-                key={`${b.brandName}-${i}`}
-                style={styles.brandCardWrap}
-              ></View>
+              <View key={`${b.brandName}-${i}`} style={styles.brandCardWrap}>
+                <BrandRecommendationCard
+                  brandName={b.brandName}
+                  species={b.species}
+                  benefits={b.benefits}
+                />
+              </View>
             ))}
           </View>
         </View>
@@ -557,175 +454,152 @@ export default function ChatbotScreen() {
     );
   }, []);
 
-  const keyExtractor = useCallback((item: ChatMessage) => item.id, []);
+  const keyExtractor = useCallback((item) => item.id, []);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
-      <KeyboardAvoidingView
-        style={styles.keyboardRoot}
-        behavior={
-          Platform.OS === "ios"
-            ? "padding"
-            : Platform.OS === "android"
-              ? "height"
-              : undefined
-        }
-        keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
-      >
-        <View style={styles.card}>
-          <View style={styles.header}>
-            <View style={styles.iconOuter}>
-              <View style={styles.iconInner}>
-                <Text style={styles.iconEmoji}>🐾</Text>
-              </View>
+    <KeyboardAvoidingView
+      style={styles.keyboardRoot}
+      behavior={
+        Platform.OS === "ios"
+          ? "padding"
+          : Platform.OS === "android"
+            ? "height"
+            : undefined
+      }
+      keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
+    >
+      <View style={styles.card}>
+        <View style={styles.header}>
+          <View style={styles.iconOuter}>
+            <View style={styles.iconInner}>
+              <Text style={styles.iconEmoji}>🐾</Text>
             </View>
-            <Text style={styles.title}>AI 펫 건강 도우미</Text>
-
-            {/* <Text style={styles.subtitle}>
-              급여, 행동, 건강에 대해 물어보세요
-            </Text>*/}
           </View>
-
-          <FlatList
-            ref={listRef}
-            data={messages}
-            keyExtractor={keyExtractor}
-            renderItem={renderMessage}
-            onContentSizeChange={scrollToBottom}
-            onLayout={scrollToBottom}
-            style={styles.messages}
-            contentContainerStyle={styles.messagesContent}
-            keyboardShouldPersistTaps="handled"
-            keyboardDismissMode="interactive"
-            /* ListEmptyComponent={
-              <Text style={styles.emptyHint}>
-                {apiKey
-                  ? "메시지를 입력하거나 사진 버튼으로 반려동물 사진을 보내보세요."
-                  : "프로젝트 루트에 .env 파일을 만들고 EXPO_PUBLIC_GEMINI_API_KEY를 설정한 뒤 Expo를 다시 시작하세요."}
-              </Text>
-            }*/
-            ListFooterComponent={
-              isLoading ? (
-                <View style={[styles.messageRow, styles.messageRowAssistant]}>
-                  <View style={styles.typingBubble}>
-                    <Text style={styles.typingDot}>● ● ●</Text>
-                  </View>
-                </View>
-              ) : (
-                <View style={{ height: 8 }} />
-              )
-            }
-          />
-
-          <View style={styles.inputRow}>
-            <TouchableOpacity
-              onPress={openPetImagePicker}
-              disabled={isLoading}
-              accessibilityLabel="Add pet photo: camera, photo library, or files"
-              style={[
-                styles.attachButton,
-                isLoading && styles.sendButtonDisabled,
-              ]}
-            >
-              <Ionicons name="images-outline" size={22} color="#ffffff" />
-            </TouchableOpacity>
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="반려동물에 대해 질문하세요…"
-              placeholderTextColor="#8a9e96"
-              editable={!isLoading}
-              style={styles.input}
-              returnKeyType="send"
-              onSubmitEditing={sendMessage}
-            />
-            <TouchableOpacity
-              onPress={sendMessage}
-              disabled={isLoading || !input.trim()}
-              style={[
-                styles.sendButton,
-                (isLoading || !input.trim()) && styles.sendButtonDisabled,
-              ]}
-            >
-              <Text style={styles.sendIcon}>➤</Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={styles.title}>Pet Health Assistant</Text>
+          <Text style={styles.subtitle}>
+            Ask anything about your pet health, feeding, and behavior
+          </Text>
         </View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+
+        <FlatList
+          ref={listRef}
+          data={messages}
+          keyExtractor={keyExtractor}
+          renderItem={renderMessage}
+          onContentSizeChange={scrollToBottom}
+          onLayout={scrollToBottom}
+          style={styles.messages}
+          contentContainerStyle={styles.messagesContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          ListFooterComponent={
+            isLoading ? (
+              <View style={[styles.messageRow, styles.messageRowAssistant]}>
+                <View style={styles.typingBubble}>
+                  <Text style={styles.typingDot}>● ● ●</Text>
+                </View>
+              </View>
+            ) : (
+              <View style={{ height: 8 }} />
+            )
+          }
+        />
+
+        <View style={styles.inputRow}>
+          <TouchableOpacity
+            onPress={openPetImagePicker}
+            disabled={isLoading}
+            accessibilityLabel="Add pet photo: camera, photo library, or files"
+            style={[
+              styles.sendButton,
+              styles.inputRowLeadingIcon,
+              isLoading && styles.sendButtonDisabled,
+            ]}
+          >
+            <Ionicons name="images-outline" size={22} color="#ffffff" />
+          </TouchableOpacity>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            placeholder="Ask about your pet..."
+            editable={!isLoading}
+            style={styles.input}
+            returnKeyType="send"
+            onSubmitEditing={sendMessage}
+          />
+          <TouchableOpacity
+            onPress={sendMessage}
+            disabled={isLoading || !input.trim()}
+            style={[
+              styles.sendButton,
+              (isLoading || !input.trim()) && styles.sendButtonDisabled,
+            ]}
+          >
+            <Text style={styles.sendIcon}>➤</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F6F7F4" },
   keyboardRoot: {
     flex: 1,
     width: "100%",
   },
   card: {
     flex: 1,
-    marginHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: "hidden",
     backgroundColor: "#fdfdfa",
     borderWidth: 1,
-    borderColor: "rgba(47, 107, 87, 0.15)",
+    borderColor: "rgba(136, 185, 154, 0.2)",
   },
   header: {
-    paddingTop: 16,
-    paddingBottom: 12,
-    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 16,
+    paddingHorizontal: 24,
     alignItems: "center",
   },
   iconOuter: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(47, 107, 87, 0.12)",
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(86, 201, 168, 0.12)",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 8,
+    marginBottom: 12,
   },
   iconInner: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "#2F6B57",
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: "#56c9a8",
     alignItems: "center",
     justifyContent: "center",
   },
   iconEmoji: {
-    fontSize: 22,
+    fontSize: 24,
     color: "#ffffff",
   },
   title: {
-    fontSize: 20,
-    fontWeight: "800",
-    color: "#2F6B57",
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#5a9fb8",
   },
   subtitle: {
     marginTop: 4,
     fontSize: 13,
-    color: "#5a7a6e",
+    color: "#88b99a",
     textAlign: "center",
-    lineHeight: 18,
   },
   messages: {
     flex: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
   },
   messagesContent: {
-    paddingBottom: 12,
-    flexGrow: 1,
-  },
-  emptyHint: {
-    fontSize: 14,
-    color: "#7a8f86",
-    textAlign: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 24,
-    lineHeight: 20,
+    paddingBottom: 16,
   },
   messageRow: {
     marginVertical: 4,
@@ -755,10 +629,10 @@ const styles = StyleSheet.create({
     maxWidth: "85%",
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 16,
+    borderRadius: 18,
   },
   messageBubbleUser: {
-    backgroundColor: "#2F6B57",
+    backgroundColor: "#56c9a8",
     borderBottomRightRadius: 4,
     overflow: "hidden",
   },
@@ -767,14 +641,14 @@ const styles = StyleSheet.create({
     maxWidth: "100%",
     height: 160,
     borderRadius: 12,
-    marginBottom: 4,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    marginBottom: 8,
+    backgroundColor: "rgba(255,255,255,0.25)",
     alignSelf: "flex-end",
   },
   messageBubbleAssistant: {
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "rgba(47, 107, 87, 0.25)",
+    borderColor: "rgba(136, 185, 154, 0.3)",
     borderBottomLeftRadius: 4,
   },
   messageBubbleError: {
@@ -785,7 +659,6 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 14,
     color: "#1f2933",
-    lineHeight: 20,
   },
   messageTextUser: {
     color: "#ffffff",
@@ -793,57 +666,52 @@ const styles = StyleSheet.create({
   typingBubble: {
     backgroundColor: "#ffffff",
     borderWidth: 1,
-    borderColor: "rgba(47, 107, 87, 0.25)",
-    borderRadius: 16,
+    borderColor: "rgba(136, 185, 154, 0.3)",
+    borderRadius: 18,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   typingDot: {
-    color: "#2F6B57",
+    color: "#56c9a8",
     letterSpacing: 1,
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     borderTopWidth: 1,
-    borderTopColor: "rgba(47, 107, 87, 0.15)",
+    borderTopColor: "rgba(136, 185, 154, 0.2)",
     backgroundColor: "#ffffff",
   },
   input: {
     flex: 1,
     marginRight: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "rgba(47, 107, 87, 0.35)",
-    fontSize: 15,
-    color: "#1f2933",
+    borderColor: "rgba(136, 185, 154, 0.4)",
+    fontSize: 14,
   },
-  attachButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#2F6B57",
+  inputRowLeadingIcon: {
     marginRight: 8,
   },
   sendButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#2F6B57",
+    backgroundColor: "#56c9a8",
   },
   sendButtonDisabled: {
-    opacity: 0.45,
+    opacity: 0.5,
   },
   sendIcon: {
     fontSize: 18,
     color: "#ffffff",
   },
 });
+
+export default PetHealthChat;
