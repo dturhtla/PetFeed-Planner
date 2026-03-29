@@ -1,3 +1,12 @@
+import BrandRecommendationCard from "@/components/BrandRecommendationCard";
+import type { ChatReplyLocale } from "../utils/chatLocale";
+import {
+  fixGluedNumberedListStarts,
+  inferUserMessageLocale,
+  visionAnalysisLanguageSuffix,
+  visionAnalysisUserPrompt,
+  wrapUserMessageForModelLanguage,
+} from "../utils/chatLocale";
 import { parseBrandRecommendationsFromModelText } from "@/utils/brandRecommendation";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -40,23 +49,30 @@ Scope:
 - If a question is clearly not about pets at all (for example: 'what is the capital of Myanmar', 'explain World War 2'), briefly refuse and say you only help with pet health, then invite a pet-related question.
 - The user is discussing their pets. Tailor your advice specifically for pets.
 
-Language:
-- Always reply in the same language as the latest user message.
-- If the latest message is mostly Korean, answer in Korean. If it is mostly English, answer in English.
+Language (highest priority — do not ignore):
+- Match ONLY the latest user message. Ignore app UI language, earlier chat turns, or assumptions about region.
+- If the latest message is mostly English (Latin letters), the ENTIRE reply must be English: no Korean sentences, no Korean list labels, no Korean prices-only format. Brand names may stay as on the package.
+- If the latest message is mostly Korean (Hangul), the ENTIRE reply must be Korean except common brand names.
+- Never default to Korean when the user wrote in English. Never default to English when the user wrote in Korean.
 
 Format:
 - Be concise to save tokens. Use short, direct answers. Avoid long intros or repetition.
 - Do NOT use markdown formatting like **bold**, lists, or headings. Respond as plain text only.
+- Numbered lists: start "1." on a new line after the intro (line break only, not an extra empty line). Never glue "1." on the same line as the intro sentence or after a colon (e.g. not "profiles: 1. Item" on one line).
 - For serious or urgent health concerns, recommend seeing a vet.
 
-Food brand recommendations (required machine format — the app will show cards from this; users must NOT see raw JSON):
-- First write your short plain-text answer (no JSON in this part).
-- Then, if you recommend one or more commercial pet food brands, put EACH brand on its OWN line at the very end, exactly like this (valid JSON after the colon, one line per brand):
-BRAND_JSON:{"brandName":"Exact Brand Name","species":"cat","benefits":["high protein","grain-free","easy to digest"]}
-- For a second brand, add another line:
-BRAND_JSON:{"brandName":"Another Brand","species":"cat","benefits":["benefit one","benefit two"]}
-- species must be exactly "dog" or "cat" matching the animal. For rabbits or other species, describe food in plain text only — do NOT use BRAND_JSON.
-- benefits must be a JSON array of short strings (nutritional selling points).`;
+Pricing and cost questions:
+- When the user asks about price, cost, budget, or "estimate value" of food or products, you MUST answer with helpful approximate retail ranges in the user's language and typical local currency when the region is clear (e.g. KRW for Korea, USD for US). State clearly that figures are rough estimates only: real prices change by shop, promotion, pack size, channel, and date.
+- Do not refuse these questions by saying you only do health advice or cannot discuss retail pricing. Ballpark numbers with disclaimers are appropriate here.
+
+Food and product recommendations (flash cards):
+- When the user asks for food recommendations, brands, or "N good foods", and you name specific commercial dog or cat food products, you MUST enable the app's flash-card UI: after your plain-text reply, append EXACTLY one BRAND_JSON line per named product, in order, at the very end of the message. Same count as products you recommend (e.g. 6 foods → 6 BRAND_JSON lines). This is required whenever you list concrete brand/product pairs for dogs or cats — do not answer with only a numbered plain list and skip BRAND_JSON.
+- Plain-text part: short numbered summary is fine; put matching nutrition and price detail in each BRAND_JSON benefits and estimatedPrice so cards are complete. Do not show incomplete JSON, code fences, or BRAND_JSON in the middle of sentences — only full lines at the end.
+- Each BRAND_JSON line must be one complete valid JSON object on its own line (nothing cut off):
+BRAND_JSON:{"brandName":"Brand","productName":"Product line","species":"dog","estimatedPrice":"~$60–75 (30 lb)","benefits":["protein 26% crude","fat 15%","for adult maintenance"]}
+- species must be exactly "dog" or "cat" to match the animal. benefits must be short strings in the SAME language as your answer (English answer → English benefits; Korean answer → Korean benefits). estimatedPrice must match that language (e.g. USD for English, ₩/원 for Korean). Do not add the words "estimate" or "추정" in estimatedPrice—pack size in parentheses is enough.
+- Only skip BRAND_JSON when you give generic advice without naming specific commercial products, or for rabbits/other species (plain text only).
+- For rabbits or other species, plain text only — no BRAND_JSON.`;
 
 /**
  * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
@@ -106,6 +122,8 @@ type ChatMessage = {
   role: MessageRole;
   content?: string;
   imageUri?: string;
+  /** Locale of the user message that triggered this reply (for card labels) */
+  replyLocale?: ChatReplyLocale;
 };
 
 function guessMimeType(uri: string) {
@@ -145,6 +163,8 @@ export default function ChatbotScreen() {
   const modelRef = useRef<GenerativeModel | null>(null);
   /** Which TEXT_MODELS entry is used for the active chat session (advance on 429 / quota). */
   const textModelIndexRef = useRef(0);
+  /** Last text-message locale (photo replies use this for card labels). */
+  const lastReplyLocaleRef = useRef<ChatReplyLocale>("ko");
 
   const apiKey = getGeminiApiKey();
 
@@ -172,7 +192,7 @@ export default function ChatbotScreen() {
       modelRef.current = genAI.getGenerativeModel({
         model: modelName,
         systemInstruction: SYSTEM_INSTRUCTION,
-        generationConfig: { maxOutputTokens: 512 },
+        generationConfig: { maxOutputTokens: 2048 },
       });
 
       const history = messages
@@ -201,6 +221,7 @@ export default function ChatbotScreen() {
   const analyzePetPhotoWithGemini = async (
     base64: string,
     mimeType: string,
+    replyLocale: ChatReplyLocale,
   ) => {
     if (!apiKey || apiKey === "your_gemini_api_key_here") {
       throw new Error(
@@ -208,6 +229,9 @@ export default function ChatbotScreen() {
       );
     }
     const genAI = new GoogleGenerativeAI(apiKey);
+    const visionInstruction =
+      PET_PHOTO_ANALYSIS_INSTRUCTION +
+      visionAnalysisLanguageSuffix(replyLocale);
     const parts = [
       {
         inlineData: {
@@ -216,14 +240,14 @@ export default function ChatbotScreen() {
         },
       },
       {
-        text: "What can you tell me about this animal from this photo? Answer in the user's likely language if you can infer it from context; otherwise English.",
+        text: visionAnalysisUserPrompt(replyLocale),
       },
     ];
 
     const tryGenerate = async (modelName: string) => {
       const m = genAI.getGenerativeModel({
         model: modelName,
-        systemInstruction: PET_PHOTO_ANALYSIS_INSTRUCTION,
+        systemInstruction: visionInstruction,
         generationConfig: { maxOutputTokens: 600 },
       });
       const result = await m.generateContent(parts);
@@ -283,10 +307,19 @@ export default function ChatbotScreen() {
     setIsLoading(true);
 
     try {
-      const analysis = await analyzePetPhotoWithGemini(b64, mimeType);
+      const analysis = await analyzePetPhotoWithGemini(
+        b64,
+        mimeType,
+        lastReplyLocaleRef.current,
+      );
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: "assistant", content: analysis },
+        {
+          id: nextId(),
+          role: "assistant",
+          content: analysis,
+          replyLocale: lastReplyLocaleRef.current,
+        },
       ]);
     } catch (err: unknown) {
       console.error("Pet photo analysis error:", err);
@@ -423,6 +456,9 @@ export default function ChatbotScreen() {
     const text = input.trim();
     if (!text || isLoading) return;
 
+    const replyLocale = inferUserMessageLocale(text);
+    lastReplyLocaleRef.current = replyLocale;
+
     setInput("");
     setMessages((prev) => [
       ...prev,
@@ -433,7 +469,8 @@ export default function ChatbotScreen() {
     try {
       const attemptSend = async () => {
         const chat = getOrCreateChatSession();
-        const result = await chat.sendMessage(text);
+        const textForModel = wrapUserMessageForModelLanguage(text, replyLocale);
+        const result = await chat.sendMessage(textForModel);
         return result.response.text();
       };
 
@@ -465,7 +502,12 @@ export default function ChatbotScreen() {
 
       setMessages((prev) => [
         ...prev,
-        { id: nextId(), role: "assistant", content: aiText },
+        {
+          id: nextId(),
+          role: "assistant",
+          content: aiText,
+          replyLocale,
+        },
       ]);
     } catch (err: unknown) {
       console.error("Gemini API error:", err);
@@ -529,19 +571,26 @@ export default function ChatbotScreen() {
     const { caption, brands } = parseBrandRecommendationsFromModelText(
       item.content,
     );
+    const captionFormatted = fixGluedNumberedListStarts(caption);
 
     if (brands.length > 0) {
       return (
         <View style={[styles.messageRow, styles.messageRowAssistant]}>
           <View style={styles.modelBlock}>
-            {caption ? (
-              <Text style={styles.modelCaption}>{caption}</Text>
+            {captionFormatted ? (
+              <Text style={styles.modelCaption}>{captionFormatted}</Text>
             ) : null}
             {brands.map((b, i) => (
-              <View
-                key={`${b.brandName}-${i}`}
-                style={styles.brandCardWrap}
-              ></View>
+              <View key={`${b.brandName}-${i}`} style={styles.brandCardWrap}>
+                <BrandRecommendationCard
+                  brandName={b.brandName}
+                  species={b.species}
+                  benefits={b.benefits}
+                  productName={b.productName}
+                  estimatedPrice={b.estimatedPrice}
+                  labelLocale={item.replyLocale ?? "ko"}
+                />
+              </View>
             ))}
           </View>
         </View>
@@ -551,7 +600,7 @@ export default function ChatbotScreen() {
     return (
       <View style={[styles.messageRow, styles.messageRowAssistant]}>
         <View style={[styles.messageBubble, styles.messageBubbleAssistant]}>
-          <Text style={styles.messageText}>{item.content}</Text>
+          <Text style={styles.messageText}>{captionFormatted}</Text>
         </View>
       </View>
     );
