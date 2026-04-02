@@ -18,13 +18,17 @@ function isValidBrand(data: unknown): data is {
   brandName: string;
   species: "dog" | "cat";
   benefits: string[];
+  productName?: string;
+  estimatedPrice?: string;
 } {
   if (!data || typeof data !== "object") return false;
   const d = data as Record<string, unknown>;
   return (
     typeof d.brandName === "string" &&
     (d.species === "dog" || d.species === "cat") &&
-    Array.isArray(d.benefits)
+    Array.isArray(d.benefits) &&
+    (d.productName === undefined || typeof d.productName === "string") &&
+    (d.estimatedPrice === undefined || typeof d.estimatedPrice === "string")
   );
 }
 
@@ -32,6 +36,9 @@ export type ParsedBrand = {
   brandName: string;
   species: "dog" | "cat";
   benefits: string[];
+  productName?: string;
+  /** Approximate retail price (e.g. currency + pack size); model-generated estimate only */
+  estimatedPrice?: string;
 };
 
 export function parseBrandRecommendationsFromModelText(text: string | null | undefined): {
@@ -55,7 +62,11 @@ export function parseBrandRecommendationsFromModelText(text: string | null | und
       continue;
     }
     const jsonStr = extractBalancedJson(trimmed);
-    if (!jsonStr) break;
+    if (!jsonStr) {
+      // Truncated or unclosed JSON (e.g. hit token limit): never show raw BRAND_JSON to users
+      caption = caption.slice(0, idx).trim();
+      break;
+    }
     try {
       const data: unknown = JSON.parse(jsonStr);
       if (isValidBrand(data)) {
@@ -65,6 +76,12 @@ export function parseBrandRecommendationsFromModelText(text: string | null | und
           benefits: data.benefits
             .filter((b): b is string => typeof b === "string")
             .map((b) => b.trim()),
+          ...(typeof data.productName === "string" && data.productName.trim()
+            ? { productName: data.productName.trim() }
+            : {}),
+          ...(typeof data.estimatedPrice === "string" && data.estimatedPrice.trim()
+            ? { estimatedPrice: data.estimatedPrice.trim() }
+            : {}),
         });
       }
     } catch {

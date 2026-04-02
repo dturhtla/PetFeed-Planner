@@ -20,7 +20,9 @@ function isValidBrand(data) {
     data &&
     typeof data.brandName === "string" &&
     (data.species === "dog" || data.species === "cat") &&
-    Array.isArray(data.benefits)
+    Array.isArray(data.benefits) &&
+    (data.productName === undefined || typeof data.productName === "string") &&
+    (data.estimatedPrice === undefined || typeof data.estimatedPrice === "string")
   );
 }
 
@@ -46,15 +48,25 @@ export function parseBrandRecommendationsFromModelText(text) {
       continue;
     }
     const jsonStr = extractBalancedJson(trimmed);
-    if (!jsonStr) break;
+    if (!jsonStr) {
+      caption = caption.slice(0, idx).trim();
+      break;
+    }
     try {
       const data = JSON.parse(jsonStr);
       if (isValidBrand(data)) {
-        brands.push({
+        const entry = {
           brandName: data.brandName.trim(),
           species: data.species,
           benefits: data.benefits.filter((b) => typeof b === "string").map((b) => b.trim()),
-        });
+        };
+        if (typeof data.productName === "string" && data.productName.trim()) {
+          entry.productName = data.productName.trim();
+        }
+        if (typeof data.estimatedPrice === "string" && data.estimatedPrice.trim()) {
+          entry.estimatedPrice = data.estimatedPrice.trim();
+        }
+        brands.push(entry);
       }
     } catch {
       /* skip malformed */
