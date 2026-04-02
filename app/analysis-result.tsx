@@ -44,37 +44,37 @@ type FeedingRecommendation = {
 const parseAge = (ageStr: string) => {
   const yearMatch = ageStr.match(/(\d+)년/);
   const monthMatch = ageStr.match(/(\d+)개월/);
-  const years = yearMatch ? parseInt(yearMatch[1]) : 0;
-  const months = monthMatch ? parseInt(monthMatch[1]) : 0;
+  const years = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+  const months = monthMatch ? parseInt(monthMatch[1], 10) : 0;
   return { years, months };
 };
 
-const getLifeStage = (ageStr: string, gender: string, petType: string, bcs: string) => {
+const getLifeStage = (
+  ageStr: string,
+  gender: string,
+  petType: string,
+  bcs: string,
+) => {
   const { years, months } = parseAge(ageStr);
   const totalMonths = years * 12 + months;
 
   if (totalMonths < 12) {
-    if (petType === "강아지") return "어린강아지";
-    return "어린고양이";
+    return petType === "강아지" ? "어린강아지" : "어린고양이";
   }
 
   if (years >= 8) {
-    if (petType === "강아지") return "노령견";
-    return "노령묘";
+    return petType === "강아지" ? "노령견" : "노령묘";
   }
 
   if (gender === "중성화") {
-    if (petType === "강아지") return "중성화성견";
-    return "중성화성묘";
+    return petType === "강아지" ? "중성화성견" : "중성화성묘";
   }
 
   if (bcs === "과체중" || bcs === "비만") {
-    if (petType === "강아지") return "비만견";
-    return "비만묘";
+    return petType === "강아지" ? "비만견" : "비만묘";
   }
 
-  if (petType === "강아지") return "성견";
-  return "성묘";
+  return petType === "강아지" ? "성견" : "성묘";
 };
 
 export default function AnalysisResultScreen() {
@@ -83,26 +83,21 @@ export default function AnalysisResultScreen() {
     ? params.imageUri[0]
     : params.imageUri;
 
-  if (!imageUri) {
-    return <Text>이미지가 없습니다</Text>;
-  }
-
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [foodInfo, setFoodInfo] = useState<FoodInfo | null>(null);
   const [feeding, setFeeding] = useState<FeedingRecommendation | null>(null);
-
-  useEffect(() => {
-    console.log("useEffect 실행됨");
-    console.log("imageUri:", imageUri);
-    analyzeFood();
-  }, []);
 
   const analyzeFood = async () => {
     try {
       console.log("analyzeFood 시작");
       setIsLoading(true);
       setError(null);
+
+      if (!imageUri || typeof imageUri !== "string") {
+        setError("이미지를 찾을 수 없어요.");
+        return;
+      }
 
       const savedUser = await AsyncStorage.getItem("loggedInUser");
       console.log("savedUser:", savedUser);
@@ -130,17 +125,12 @@ export default function AnalysisResultScreen() {
         profile.age || "",
         profile.gender || "",
         profile.petType || "",
-        profile.bcs || ""
+        profile.bcs || "",
       );
 
       console.log("profile:", profile);
       console.log("lifeStage:", lifeStage);
       console.log("imageUri:", imageUri);
-
-      if (!imageUri) {
-        setError("이미지를 찾을 수 없어요.");
-        return;
-      }
 
       const queryParams = new URLSearchParams({
         pet_name: profile.name || "",
@@ -159,12 +149,12 @@ export default function AnalysisResultScreen() {
         name: "food.jpg",
       } as any);
 
-      console.log("API 호출 시작:", API_URL);
+      console.log("API 호출 시작:", `${API_URL}?${queryParams.toString()}`);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      const response = await fetch(`${API_URL}?${queryParams}`, {
+      const response = await fetch(`${API_URL}?${queryParams.toString()}`, {
         method: "POST",
         body: formData,
         headers: {
@@ -177,18 +167,36 @@ export default function AnalysisResultScreen() {
 
       console.log("응답 상태:", response.status);
 
-      const result = await response.json();
+      const rawText = await response.text();
+      console.log("raw 응답:", rawText);
+
+      if (!response.ok) {
+        setError(`서버 오류가 발생했어요. (${response.status})`);
+        return;
+      }
+
+      let result: any;
+      try {
+        result = JSON.parse(rawText);
+      } catch {
+        setError("서버 응답 형식이 올바르지 않아요.");
+        return;
+      }
+
       console.log("결과:", result);
 
       if (result.status === "needs_retry") {
-        setError(result.message);
+        setError(result.message || "다시 촬영해주세요.");
         return;
       }
 
       if (result.status === "success") {
         setFoodInfo(result.food_info);
         setFeeding(result.feeding_recommendation);
+        return;
       }
+
+      setError("분석 결과를 불러오지 못했어요.");
     } catch (err) {
       console.log("에러:", err);
       setError("서버 연결에 실패했어요. 서버가 실행 중인지 확인해주세요.");
@@ -197,10 +205,30 @@ export default function AnalysisResultScreen() {
     }
   };
 
+  useEffect(() => {
+    console.log("useEffect 실행됨");
+    console.log("imageUri:", imageUri);
+    analyzeFood();
+  }, [imageUri]);
+
+  if (!imageUri) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View
+          style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+        >
+          <Text>이미지가 없습니다</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+        <View
+          style={{ flex: 1, justifyContent: "center", alignItems: "center" }}
+        >
           <ActivityIndicator size="large" color="#2F6B57" />
           <Text style={{ marginTop: 16, fontSize: 16, color: "#2F6B57" }}>
             사료 분석 중...
@@ -213,7 +241,14 @@ export default function AnalysisResultScreen() {
   if (error) {
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: 20 }}>
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 20,
+          }}
+        >
           <Text style={{ fontSize: 15, color: "#D64545", textAlign: "center" }}>
             {error}
           </Text>
@@ -227,9 +262,7 @@ export default function AnalysisResultScreen() {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>분석 결과</Text>
 
-        {imageUri ? (
-          <Image source={{ uri: imageUri }} style={styles.previewImage} />
-        ) : null}
+        <Image source={{ uri: imageUri }} style={styles.previewImage} />
 
         <View style={styles.topCard}>
           <Text style={styles.brand}>
@@ -258,14 +291,19 @@ export default function AnalysisResultScreen() {
             },
             {
               label: "원재료",
-              value: foodInfo?.main_ingredients
+              value: foodInfo?.main_ingredients?.length
                 ? foodInfo.main_ingredients.join(", ")
                 : "-",
             },
           ].map((item) => (
             <View key={item.label} style={styles.row}>
               <Text style={styles.label}>{item.label}</Text>
-              <Text style={[styles.value, { flex: 1, textAlign: "right", marginLeft: 8 }]}>
+              <Text
+                style={[
+                  styles.value,
+                  { flex: 1, textAlign: "right", marginLeft: 8 },
+                ]}
+              >
                 {item.value}
               </Text>
             </View>
@@ -275,16 +313,23 @@ export default function AnalysisResultScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>추천/주의 사항</Text>
           <Text style={styles.desc}>
-            • 1일 권장 급여량: {feeding?.daily_grams}g (1회{" "}
-            {feeding?.grams_per_meal}g, {feeding?.meals_per_day}회)
+            • 1일 권장 급여량: {feeding?.daily_grams ?? "-"}g (1회{" "}
+            {feeding?.grams_per_meal ?? "-"}g, {feeding?.meals_per_day ?? "-"}
+            회)
           </Text>
-          <Text style={styles.desc}>
-            • {feeding?.recommendation}
-          </Text>
-          {feeding?.ingredient_warnings &&
-          feeding.ingredient_warnings.length > 0 ? (
+          <Text style={styles.desc}>• {feeding?.recommendation ?? "-"}</Text>
+
+          {feeding?.ingredient_warnings?.length ? (
             feeding.ingredient_warnings.map((warning, index) => (
-              <Text key={index} style={{ fontSize: 13, color: "#D64545", lineHeight: 21, marginBottom: 6 }}>
+              <Text
+                key={index}
+                style={{
+                  fontSize: 13,
+                  color: "#D64545",
+                  lineHeight: 21,
+                  marginBottom: 6,
+                }}
+              >
                 • {warning}
               </Text>
             ))
