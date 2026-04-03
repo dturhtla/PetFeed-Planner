@@ -12,7 +12,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
-type GenderType = "남" | "여" | "";
+type GenderType = "남" | "여" | "중성화" | "";
 
 type LoggedInUser = {
   id: string;
@@ -27,6 +27,7 @@ type ProfileDraftData = {
   gender?: GenderType;
   petType?: PetType;
   bcs?: BcsLabel;
+  diseases?: string[];
 };
 
 const dogBcsList = [
@@ -136,7 +137,7 @@ export default function BcsCheckScreen() {
   const title =
     petType === "고양이" ? "고양이 비만도 체크" : "강아지 비만도 체크";
 
-  const handleDone = async () => {
+  const handleNext = async () => {
     if (!selectedBcs) {
       Alert.alert("알림", "비만도를 하나 선택해주세요.");
       return;
@@ -151,7 +152,6 @@ export default function BcsCheckScreen() {
 
       const draftKey = `petProfileDraft_${userEmail}`;
       const profileKey = `petProfile_${userEmail}`;
-      const completedKey = `profileCompleted_${userEmail}`;
 
       const savedDraft = await AsyncStorage.getItem(draftKey);
       const parsedDraft: ProfileDraftData = savedDraft
@@ -164,7 +164,7 @@ export default function BcsCheckScreen() {
         bcs: selectedBcs,
       };
 
-      // 프로필 수정 화면에서 들어온 경우 → 프로필 화면으로 복귀
+      // 프로필 수정 화면에서 BCS 수정으로 들어온 경우
       if (params?.from === "profile") {
         await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
 
@@ -173,12 +173,14 @@ export default function BcsCheckScreen() {
           params: {
             selectedBcs,
             fromBcsEdit: "true",
+            editIndex:
+              typeof params?.editIndex === "string" ? params.editIndex : "",
           },
         } as any);
         return;
       }
 
-      // 처음 프로필 입력인 경우 → 정보 저장 후 메인화면 이동
+      // 새 프로필 추가 흐름인 경우
       if (
         !updatedProfile.name ||
         !updatedProfile.age ||
@@ -194,9 +196,8 @@ export default function BcsCheckScreen() {
 
       await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
       await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
-      await AsyncStorage.setItem(completedKey, "true");
 
-      router.replace("/home" as any);
+      router.push("/disease-check" as any);
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "BCS 저장 중 오류가 발생했습니다.");
@@ -233,8 +234,8 @@ export default function BcsCheckScreen() {
           );
         })}
 
-        <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
-          <Text style={styles.doneButtonText}>DONE</Text>
+        <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
+          <Text style={styles.nextButtonText}>NEXT</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -290,7 +291,7 @@ const styles = StyleSheet.create({
   selectedText: {
     color: "#FFFFFF",
   },
-  doneButton: {
+  nextButton: {
     height: 54,
     backgroundColor: "#1F5F43",
     borderRadius: 14,
@@ -298,7 +299,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 6,
   },
-  doneButtonText: {
+  nextButtonText: {
     color: "#FFF",
     fontSize: 22,
     fontFamily: "Nanum",

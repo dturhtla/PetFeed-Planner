@@ -3,14 +3,14 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -58,6 +58,7 @@ export default function DeleteAccountScreen() {
       await AsyncStorage.removeItem(`petProfile_${currentUser.email}`);
       await AsyncStorage.removeItem(`petProfileDraft_${currentUser.email}`);
       await AsyncStorage.removeItem(`profileCompleted_${currentUser.email}`);
+      await AsyncStorage.removeItem(`petProfiles_${currentUser.email}`);
 
       Alert.alert("탈퇴 완료", "계정이 삭제되었습니다.", [
         {
