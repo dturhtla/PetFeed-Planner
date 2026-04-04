@@ -18,8 +18,7 @@ async def search_official_feeding_guide(
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     species_korean = {
-        "dog": "강아지", "cat": "고양이",
-        "hamster": "햄스터", "rabbit": "토끼"
+        "dog": "강아지", "cat": "고양이"
     }
 
     prompt = f"""{brand} {product_name} 사료의 공식 권장 급여량을 알려주세요.
@@ -132,8 +131,7 @@ async def generate_recommendation_text(
     client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     species_korean = {
-        "dog": "강아지", "cat": "고양이",
-        "hamster": "햄스터", "rabbit": "토끼"
+        "dog": "강아지", "cat": "고양이"
     }
 
     official_info = f"브랜드 공식 권장량: {official_grams:.0f}g" if official_grams else "브랜드 공식 권장량: 정보 없음"
