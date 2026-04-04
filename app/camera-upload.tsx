@@ -1,16 +1,23 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraType, CameraView, useCameraPermissions } from "expo-camera";
+import * as ImageManipulator from "expo-image-manipulator";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Dimensions,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
+
+const FRAME_WIDTH = SCREEN_WIDTH * 0.78;
+const FRAME_HEIGHT = FRAME_WIDTH / 0.78;
 
 export default function CameraUploadScreen() {
   const router = useRouter();
@@ -26,6 +33,40 @@ export default function CameraUploadScreen() {
       requestPermission();
     }
   }, [permission, requestPermission]);
+  
+  //가이드 박스 부분 이미지 크롭 
+  const cropToFrame = async (uri: string) => {
+    const image = await ImageManipulator.manipulateAsync(uri, []);
+    const { width: imgWidth, height: imgHeight } = image;
+
+    const scaleX = imgWidth / SCREEN_WIDTH;
+    const scaleY = imgHeight / SCREEN_HEIGHT;
+
+    const frameLeft = (SCREEN_WIDTH - FRAME_WIDTH) / 2;
+    const frameTop = (SCREEN_HEIGHT - FRAME_HEIGHT) / 2;
+
+    const cropX = frameLeft * scaleX;
+    const cropY = frameTop * scaleY;
+    const cropWidth = FRAME_WIDTH * scaleX;
+    const cropHeight = FRAME_HEIGHT * scaleY;
+
+    const cropped = await ImageManipulator.manipulateAsync(
+      uri,
+      [
+        {
+          crop: {
+            originX: cropX,
+            originY: cropY,
+            width: cropWidth,
+            height: cropHeight,
+          },
+        },
+      ],
+      { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
+    );
+
+    return cropped.uri;
+  };
 
   const handleTakePhoto = async () => {
     if (!cameraRef.current || isTakingPhoto) return;
@@ -39,9 +80,11 @@ export default function CameraUploadScreen() {
 
       if (!photo?.uri) return;
 
+      const croppedUri = await cropToFrame(photo.uri);
+
       router.push({
         pathname: "/analysis-result",
-        params: { imageUri: photo.uri },
+        params: { imageUri: croppedUri },
       });
     } catch (error) {
       console.log(error);
