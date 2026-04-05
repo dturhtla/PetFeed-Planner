@@ -26,6 +26,7 @@ export default function CameraUploadScreen() {
   const [facing, setFacing] = useState<CameraType>("back");
   const [isTakingPhoto, setIsTakingPhoto] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const [frameLayout, setFrameLayout] = useState<{x: number, y: number, width: number, height: number} | null>(null);
 
   useEffect(() => {
     if (!permission) return;
@@ -33,40 +34,39 @@ export default function CameraUploadScreen() {
       requestPermission();
     }
   }, [permission, requestPermission]);
-  
-  //가이드 박스 부분 이미지 크롭 
+
+  // 사진 크롭 기능
   const cropToFrame = async (uri: string) => {
     const image = await ImageManipulator.manipulateAsync(uri, []);
     const { width: imgWidth, height: imgHeight } = image;
 
+    console.log("이미지 크기:", imgWidth, imgHeight);
+    console.log("화면 크기:", SCREEN_WIDTH, SCREEN_HEIGHT);
+    console.log("frameLayout:", frameLayout);
+
     const scaleX = imgWidth / SCREEN_WIDTH;
     const scaleY = imgHeight / SCREEN_HEIGHT;
 
-    const frameLeft = (SCREEN_WIDTH - FRAME_WIDTH) / 2;
-    const frameTop = (SCREEN_HEIGHT - FRAME_HEIGHT) / 2;
+    const frameLeft = frameLayout ? frameLayout.x : (SCREEN_WIDTH - FRAME_WIDTH) / 2;
+    const frameTop = frameLayout ? frameLayout.y : (SCREEN_HEIGHT - FRAME_HEIGHT) / 2;
+    const frameW = frameLayout ? frameLayout.width : FRAME_WIDTH;
+    const frameH = frameLayout ? frameLayout.height : FRAME_HEIGHT;
 
-    const cropX = frameLeft * scaleX;
-    const cropY = frameTop * scaleY;
-    const cropWidth = FRAME_WIDTH * scaleX;
-    const cropHeight = FRAME_HEIGHT * scaleY;
+    const cropX = Math.max(0, frameLeft * scaleX);
+    const cropY = Math.max(0, frameTop * scaleY);
+    const cropWidth = Math.min(frameW * scaleX, imgWidth - cropX);
+    const cropHeight = Math.min(frameH * scaleY, imgHeight - cropY);
 
     const cropped = await ImageManipulator.manipulateAsync(
       uri,
-      [
-        {
-          crop: {
-            originX: cropX,
-            originY: cropY,
-            width: cropWidth,
-            height: cropHeight,
-          },
-        },
-      ],
+      [{ crop: { originX: cropX, originY: cropY, width: cropWidth, height: cropHeight } }],
       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
     );
 
     return cropped.uri;
   };
+
+  
 
   const handleTakePhoto = async () => {
     if (!cameraRef.current || isTakingPhoto) return;
@@ -190,7 +190,13 @@ export default function CameraUploadScreen() {
             </View>
           </View>
 
-          <View style={styles.focusFrame} />
+          <View
+            style={styles.focusFrame}
+            onLayout={(e) => {
+              const { x, y, width, height } = e.nativeEvent.layout;
+              setFrameLayout({ x, y, width, height });
+            }}
+          />
 
           <View style={styles.bottomArea}>
             <TouchableOpacity
@@ -219,6 +225,8 @@ export default function CameraUploadScreen() {
     </View>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   container: {
