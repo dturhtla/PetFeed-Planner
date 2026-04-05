@@ -62,7 +62,7 @@ def calculate_daily_kcal(species: str, weight_kg: float, life_stage: str) -> flo
         "pregnant":       3.0,
         },
     "cat": {
-        "puppy":          2.0,
+        "kitten":          1.5,
         "adult":          1.2,
         "adult_neutered": 1.0,
         "senior":         1.1,

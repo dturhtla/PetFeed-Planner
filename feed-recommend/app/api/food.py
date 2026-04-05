@@ -39,7 +39,7 @@ LIFE_STAGE_MAP = {
     "노령견":     "senior",
     "비만견":     "obese",
     "임신견":     "pregnant",
-    "어린고양이":  "puppy",
+    "어린고양이":  "kitten",
     "성묘":       "adult",
     "중성화성묘":  "adult_neutered",
     "노령묘":     "senior",
