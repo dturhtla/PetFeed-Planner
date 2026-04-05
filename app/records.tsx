@@ -1,10 +1,14 @@
-import { Ionicons } from "@expo/vector-icons";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import DateTimePicker, {
+  DateTimePickerEvent,
+} from "@react-native-community/datetimepicker";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -42,17 +46,126 @@ type FeedingRecord = {
   time: string;
 };
 
-const FOOD_OPTIONS = ["로얄캐닌", "힐스", "오리젠", "나우", "사료 직접입력"];
+type FoodItem = {
+  id: string;
+  name: string;
+  subLabel: string;
+  gramLabel: string;
+  isCustom?: boolean;
+};
 
-const TIME_OPTIONS = [
-  "07:00 AM",
-  "08:00 AM",
-  "09:00 AM",
-  "12:00 PM",
-  "06:00 PM",
-  "08:00 PM",
-  "10:00 PM",
+type AlarmItem = {
+  id: string;
+  period: "오전" | "오후";
+  hour: string;
+  minute: string;
+  feedingType: "아침" | "점심" | "저녁";
+  foodName: string;
+  foodSubLabel: string;
+  amount: number;
+  days: string[];
+  enabled: boolean;
+};
+
+const DEFAULT_FOOD_LIBRARY: FoodItem[] = [
+  {
+    id: "1",
+    name: "로얄캐닌 키튼",
+    subLabel: "육묘용 50g",
+    gramLabel: "50g",
+  },
+  {
+    id: "2",
+    name: "힐스 사이언스 다이어트",
+    subLabel: "40g",
+    gramLabel: "40g",
+  },
+  {
+    id: "3",
+    name: "캐니노 프로플랜",
+    subLabel: "45g",
+    gramLabel: "45g",
+  },
+  {
+    id: "4",
+    name: "네추럴발란스",
+    subLabel: "35g",
+    gramLabel: "35g",
+  },
+  {
+    id: "5",
+    name: "오리젠 키튼",
+    subLabel: "30g",
+    gramLabel: "30g",
+  },
 ];
+
+const getAlarmKey = (email: string) => `feeding_alarms_${email}`;
+const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+function createInitialTime() {
+  const date = new Date();
+  date.setHours(0);
+  date.setMinutes(0);
+  date.setSeconds(0);
+  date.setMilliseconds(0);
+  return date;
+}
+
+function to24Hour(period: "오전" | "오후", hour: string) {
+  let h = Number(hour);
+
+  if (period === "오전") {
+    if (h === 12) h = 0;
+  } else {
+    if (h !== 12) h += 12;
+  }
+
+  return h;
+}
+
+function formatAlarmDisplayTime(alarm: AlarmItem) {
+  const h = to24Hour(alarm.period, alarm.hour);
+  return `${String(h).padStart(2, "0")}:${alarm.minute}`;
+}
+
+function matchesDay(alarm: AlarmItem, dayKor: string) {
+  if (!alarm.days || alarm.days.length === 0) return false;
+  return alarm.days.includes(dayKor);
+}
+
+function getNearestUpcomingAlarm(alarms: AlarmItem[]) {
+  const now = new Date();
+  const enabledAlarms = alarms.filter((alarm) => alarm.enabled);
+
+  if (enabledAlarms.length === 0) return null;
+
+  let nearest: { alarm: AlarmItem; at: Date } | null = null;
+
+  for (const alarm of enabledAlarms) {
+    for (let addDay = 0; addDay < 7; addDay++) {
+      const candidate = new Date(now);
+      candidate.setDate(now.getDate() + addDay);
+
+      const dayKor = DAYS[candidate.getDay()];
+      if (!matchesDay(alarm, dayKor)) continue;
+
+      candidate.setHours(to24Hour(alarm.period, alarm.hour));
+      candidate.setMinutes(Number(alarm.minute));
+      candidate.setSeconds(0);
+      candidate.setMilliseconds(0);
+
+      if (candidate <= now) continue;
+
+      if (!nearest || candidate < nearest.at) {
+        nearest = { alarm, at: candidate };
+      }
+      break;
+    }
+  }
+
+  return nearest?.alarm ?? null;
+}
 
 export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
@@ -63,16 +176,26 @@ export default function RecordsScreen() {
 
   const [records, setRecords] = useState<FeedingRecord[]>([]);
 
-  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
-  const [isFoodMenuOpen, setIsFoodMenuOpen] = useState(false);
-  const [isTimeMenuOpen, setIsTimeMenuOpen] = useState(false);
+  const [nearestAlarm, setNearestAlarm] = useState<AlarmItem | null>(null);
+  const [hasAnyEnabledAlarm, setHasAnyEnabledAlarm] = useState(false);
 
-  const [selectedFood, setSelectedFood] = useState("");
-  const [isCustomFoodInput, setIsCustomFoodInput] = useState(false);
-  const [customFoodName, setCustomFoodName] = useState("");
+  const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+  const [isFoodSheetVisible, setIsFoodSheetVisible] = useState(false);
+  const [isTimePickerVisible, setIsTimePickerVisible] = useState(false);
+  const [isAddFoodFormVisible, setIsAddFoodFormVisible] = useState(false);
+
+  const [foodLibrary, setFoodLibrary] =
+    useState<FoodItem[]>(DEFAULT_FOOD_LIBRARY);
+  const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
+  const [tempSelectedFood, setTempSelectedFood] = useState<FoodItem | null>(
+    null,
+  );
+
+  const [newFoodName, setNewFoodName] = useState("");
+  const [newFoodGram, setNewFoodGram] = useState("");
 
   const [amount, setAmount] = useState("0");
-  const [selectedTime, setSelectedTime] = useState("00:00 AM");
+  const [selectedTime, setSelectedTime] = useState<Date>(createInitialTime());
 
   const getRecordsKey = (email: string) => `feedingRecords_${email}`;
 
@@ -84,40 +207,29 @@ export default function RecordsScreen() {
     return `${year}.${month}.${day}`;
   };
 
-  const filterAmountInput = (value: string) => {
-    let filtered = value.replace(/[^0-9.]/g, "");
+  const formatDisplayTime = (date: Date) => {
+    const hours = date.getHours();
+    const minutes = date.getMinutes();
+    const isPM = hours >= 12;
+    const period = isPM ? "PM" : "AM";
+    const displayHour = hours % 12 === 0 ? 12 : hours % 12;
 
-    const dotCount = (filtered.match(/\./g) || []).length;
-    if (dotCount > 1) {
-      const firstDotIndex = filtered.indexOf(".");
-      filtered =
-        filtered.slice(0, firstDotIndex + 1) +
-        filtered.slice(firstDotIndex + 1).replace(/\./g, "");
-    }
-
-    const parts = filtered.split(".");
-
-    if (parts.length === 1) {
-      filtered = parts[0].slice(0, 3);
-    }
-
-    if (parts.length === 2) {
-      const integerPart = parts[0].slice(0, 3);
-      const decimalPart = parts[1].slice(0, 1);
-      filtered = `${integerPart}.${decimalPart}`;
-    }
-
-    return filtered;
+    return `${String(displayHour).padStart(2, "0")}:${String(minutes).padStart(
+      2,
+      "0",
+    )} ${period}`;
   };
 
   const resetAddForm = useCallback(() => {
-    setSelectedFood("");
-    setCustomFoodName("");
-    setIsCustomFoodInput(false);
+    setSelectedFood(null);
+    setTempSelectedFood(null);
     setAmount("0");
-    setSelectedTime("00:00 AM");
-    setIsFoodMenuOpen(false);
-    setIsTimeMenuOpen(false);
+    setSelectedTime(createInitialTime());
+    setIsFoodSheetVisible(false);
+    setIsTimePickerVisible(false);
+    setIsAddFoodFormVisible(false);
+    setNewFoodName("");
+    setNewFoodGram("");
   }, []);
 
   const closeAddModal = useCallback(() => {
@@ -132,12 +244,32 @@ export default function RecordsScreen() {
           return gestureState.dy > 6;
         },
         onPanResponderRelease: (_, gestureState) => {
-          if (gestureState.dy > 45) {
+          if (
+            gestureState.dy > 45 &&
+            !isFoodSheetVisible &&
+            !isTimePickerVisible
+          ) {
             closeAddModal();
           }
         },
       }),
-    [closeAddModal],
+    [closeAddModal, isFoodSheetVisible, isTimePickerVisible],
+  );
+
+  const foodSheetPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gestureState) => {
+          return gestureState.dy > 6;
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          if (gestureState.dy > 45) {
+            setIsFoodSheetVisible(false);
+            setIsAddFoodFormVisible(false);
+          }
+        },
+      }),
+    [],
   );
 
   const loadProfilesAndRecords = useCallback(async () => {
@@ -149,6 +281,8 @@ export default function RecordsScreen() {
         setPetProfiles([]);
         setSelectedPetId("");
         setRecords([]);
+        setNearestAlarm(null);
+        setHasAnyEnabledAlarm(false);
         return;
       }
 
@@ -163,6 +297,7 @@ export default function RecordsScreen() {
         `petProfile_${email}`,
       );
       const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
+      const savedAlarms = await AsyncStorage.getItem(getAlarmKey(email));
 
       let loadedProfiles: PetProfileItem[] = [];
 
@@ -214,6 +349,16 @@ export default function RecordsScreen() {
       } else {
         setRecords([]);
       }
+
+      const parsedAlarms: AlarmItem[] = savedAlarms
+        ? JSON.parse(savedAlarms)
+        : [];
+      const enabledAlarms = Array.isArray(parsedAlarms)
+        ? parsedAlarms.filter((alarm) => alarm.enabled)
+        : [];
+
+      setHasAnyEnabledAlarm(enabledAlarms.length > 0);
+      setNearestAlarm(getNearestUpcomingAlarm(enabledAlarms));
     } catch (error) {
       console.log(error);
     }
@@ -238,12 +383,7 @@ export default function RecordsScreen() {
 
   const handleSaveRecord = async () => {
     if (!userEmail || !selectedPetId) return;
-
-    const finalFoodName = isCustomFoodInput
-      ? customFoodName.trim()
-      : selectedFood.trim();
-
-    if (!finalFoodName) return;
+    if (!selectedFood) return;
     if (!amount.trim()) return;
 
     try {
@@ -251,9 +391,9 @@ export default function RecordsScreen() {
         id: `${Date.now()}`,
         petId: selectedPetId,
         date: formatDate(),
-        foodName: finalFoodName,
+        foodName: selectedFood.name,
         amount: `${amount}g`,
-        time: selectedTime,
+        time: formatDisplayTime(selectedTime),
       };
 
       const updatedRecords = [...records, newRecord];
@@ -280,6 +420,61 @@ export default function RecordsScreen() {
     const current = Number(amount || "0");
     const next = current + 5;
     setAmount(String(next));
+  };
+
+  const openFoodSheet = () => {
+    setTempSelectedFood(selectedFood);
+    setIsAddFoodFormVisible(false);
+    setNewFoodName("");
+    setNewFoodGram("");
+    setIsFoodSheetVisible(true);
+  };
+
+  const handleCompleteFoodSelection = () => {
+    setSelectedFood(tempSelectedFood);
+    setIsFoodSheetVisible(false);
+    setIsAddFoodFormVisible(false);
+    setNewFoodName("");
+    setNewFoodGram("");
+  };
+
+  const handleTimeChange = (event: DateTimePickerEvent, date?: Date) => {
+    if (Platform.OS === "android") {
+      setIsTimePickerVisible(false);
+
+      if (event.type === "set" && date) {
+        setSelectedTime(date);
+      }
+      return;
+    }
+
+    if (date) {
+      setSelectedTime(date);
+    }
+  };
+
+  const handleAddNewFood = () => {
+    const trimmedName = newFoodName.trim();
+    const trimmedGram = newFoodGram.trim();
+
+    if (!trimmedName || !trimmedGram) return;
+
+    const gramOnly = trimmedGram.replace(/[^0-9]/g, "");
+    if (!gramOnly) return;
+
+    const newItem: FoodItem = {
+      id: `custom-${Date.now()}`,
+      name: trimmedName,
+      subLabel: `${gramOnly}g`,
+      gramLabel: `${gramOnly}g`,
+      isCustom: true,
+    };
+
+    setFoodLibrary((prev) => [newItem, ...prev]);
+    setTempSelectedFood(newItem);
+    setIsAddFoodFormVisible(false);
+    setNewFoodName("");
+    setNewFoodGram("");
   };
 
   return (
@@ -345,16 +540,63 @@ export default function RecordsScreen() {
           })}
         </ScrollView>
 
-        <View style={styles.noticeBox}>
-          <View style={styles.noticeLeft}>
-            <Ionicons name="notifications-outline" size={16} color="#D58A3A" />
-            <Text style={styles.noticeText}>급여 알림을 등록해주세요</Text>
-          </View>
+        {!hasAnyEnabledAlarm || !nearestAlarm ? (
+          <TouchableOpacity
+            style={styles.noticeBox}
+            activeOpacity={0.85}
+            onPress={() => router.push("/feeding-alarm")}
+          >
+            <View style={styles.noticeLeft}>
+              <Ionicons
+                name="notifications-outline"
+                size={16}
+                color="#D58A3A"
+              />
+              <Text style={styles.noticeText}>급여 알림을 등록해주세요</Text>
+            </View>
 
-          <TouchableOpacity activeOpacity={0.8}>
-            <Text style={styles.noticeLink}>입력 →</Text>
+            <View style={styles.noticeRight}>
+              <Text style={styles.noticeLink}>입력</Text>
+              <Ionicons name="chevron-forward" size={16} color="#D06B33" />
+            </View>
           </TouchableOpacity>
-        </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.alarmPreviewBox}
+            activeOpacity={0.85}
+            onPress={() => router.push("/feeding-alarm")}
+          >
+            <View style={styles.alarmPreviewLeft}>
+              <Ionicons
+                name="notifications-outline"
+                size={18}
+                color="#D2A11D"
+                style={styles.alarmBellIcon}
+              />
+
+              <Text style={styles.alarmPreviewTime}>
+                {formatAlarmDisplayTime(nearestAlarm)}
+              </Text>
+
+              <View style={styles.alarmPreviewTextWrap}>
+                <Text style={styles.alarmPreviewMeta}>
+                  {nearestAlarm.feedingType}{" "}
+                  {nearestAlarm.days?.length
+                    ? nearestAlarm.days.join(" / ")
+                    : "매일"}
+                </Text>
+                <Text style={styles.alarmPreviewFood}>
+                  {nearestAlarm.foodName} {nearestAlarm.amount}g
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.alarmPreviewEditWrap}>
+              <Text style={styles.alarmPreviewEditText}>편집</Text>
+              <Ionicons name="chevron-forward" size={16} color="#D06B33" />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {filteredRecords.length === 0 ? (
           <View style={styles.emptyWrap}>
@@ -412,71 +654,38 @@ export default function RecordsScreen() {
               <Text style={styles.sheetTitle}>새 급여 기록하기</Text>
 
               <View style={styles.fieldGroup}>
-                {isCustomFoodInput ? (
-                  <View style={styles.customFoodRow}>
-                    <TextInput
-                      style={styles.customFoodInput}
-                      placeholder="사료명을 직접 입력하세요"
-                      placeholderTextColor="#8A8A8A"
-                      value={customFoodName}
-                      onChangeText={setCustomFoodName}
-                    />
-                    <TouchableOpacity
-                      style={styles.customFoodCancelButton}
-                      onPress={() => {
-                        const trimmed = customFoodName.trim();
-                        if (!trimmed) return;
+                <TouchableOpacity
+                  style={styles.inputBox}
+                  activeOpacity={0.85}
+                  onPress={openFoodSheet}
+                >
+                  {selectedFood ? (
+                    <View style={styles.selectedFoodInline}>
+                      <View style={styles.selectedFoodIconWrap}>
+                        <MaterialCommunityIcons
+                          name="food-drumstick"
+                          size={18}
+                          color="#5A9EDB"
+                        />
+                      </View>
 
-                        setSelectedFood(trimmed);
-                        setIsCustomFoodInput(false);
-                        setCustomFoodName("");
-                      }}
-                    >
-                      <Text style={styles.customFoodCancelText}>선택</Text>
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <TouchableOpacity
-                    style={styles.inputBox}
-                    activeOpacity={0.85}
-                    onPress={() => {
-                      setIsFoodMenuOpen((prev) => !prev);
-                      setIsTimeMenuOpen(false);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.inputText,
-                        !selectedFood && styles.placeholderText,
-                      ]}
-                    >
-                      {selectedFood || "사료 선택하기"}
+                      <View style={styles.selectedFoodTextWrap}>
+                        <Text style={styles.selectedFoodName}>
+                          {selectedFood.name}
+                        </Text>
+                        <Text style={styles.selectedFoodSub}>
+                          {selectedFood.subLabel}
+                        </Text>
+                      </View>
+                    </View>
+                  ) : (
+                    <Text style={[styles.inputText, styles.placeholderText]}>
+                      사료 선택하기
                     </Text>
-                    <Ionicons name="chevron-down" size={18} color="#2F6B57" />
-                  </TouchableOpacity>
-                )}
+                  )}
 
-                {isFoodMenuOpen && !isCustomFoodInput && (
-                  <View style={styles.dropdownBox}>
-                    {FOOD_OPTIONS.map((food) => (
-                      <TouchableOpacity
-                        key={food}
-                        style={styles.dropdownItem}
-                        onPress={() => {
-                          if (food === "사료 직접입력") {
-                            setIsCustomFoodInput(true);
-                            setSelectedFood("");
-                          } else {
-                            setSelectedFood(food);
-                          }
-                          setIsFoodMenuOpen(false);
-                        }}
-                      >
-                        <Text style={styles.dropdownItemText}>{food}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
+                  <Ionicons name="chevron-down" size={18} color="#2F6B57" />
+                </TouchableOpacity>
               </View>
 
               <View style={styles.amountBox}>
@@ -508,31 +717,13 @@ export default function RecordsScreen() {
                 <TouchableOpacity
                   style={styles.inputBox}
                   activeOpacity={0.85}
-                  onPress={() => {
-                    setIsTimeMenuOpen((prev) => !prev);
-                    setIsFoodMenuOpen(false);
-                  }}
+                  onPress={() => setIsTimePickerVisible(true)}
                 >
-                  <Text style={styles.inputText}>시간 {selectedTime}</Text>
+                  <Text style={styles.inputText}>
+                    시간 {formatDisplayTime(selectedTime)}
+                  </Text>
                   <Ionicons name="chevron-down" size={18} color="#2F6B57" />
                 </TouchableOpacity>
-
-                {isTimeMenuOpen && (
-                  <View style={styles.dropdownBox}>
-                    {TIME_OPTIONS.map((time) => (
-                      <TouchableOpacity
-                        key={time}
-                        style={styles.dropdownItem}
-                        onPress={() => {
-                          setSelectedTime(time);
-                          setIsTimeMenuOpen(false);
-                        }}
-                      >
-                        <Text style={styles.dropdownItemText}>{time}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                )}
               </View>
 
               <View style={styles.sheetButtonRow}>
@@ -553,6 +744,204 @@ export default function RecordsScreen() {
             </View>
           </View>
         </View>
+
+        <Modal
+          visible={isFoodSheetVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => {
+            setIsFoodSheetVisible(false);
+            setIsAddFoodFormVisible(false);
+          }}
+        >
+          <View style={styles.nestedModalOverlay}>
+            <Pressable
+              style={styles.modalBackdrop}
+              onPress={() => {
+                setIsFoodSheetVisible(false);
+                setIsAddFoodFormVisible(false);
+              }}
+            />
+
+            <View
+              {...foodSheetPanResponder.panHandlers}
+              style={[styles.foodSheet, { paddingBottom: insets.bottom + 12 }]}
+            >
+              <View style={styles.sheetHandle} />
+
+              <Text style={styles.foodSheetTitle}>사료 선택</Text>
+
+              <ScrollView
+                style={styles.foodList}
+                contentContainerStyle={styles.foodListContent}
+                nestedScrollEnabled
+                showsVerticalScrollIndicator={false}
+              >
+                {foodLibrary.map((item) => {
+                  const isSelected = tempSelectedFood?.id === item.id;
+
+                  return (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[
+                        styles.foodRow,
+                        isSelected && styles.foodRowSelected,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setTempSelectedFood(item)}
+                    >
+                      <View style={styles.foodRowLeft}>
+                        <View
+                          style={[
+                            styles.foodRadio,
+                            isSelected && styles.foodRadioSelected,
+                          ]}
+                        />
+                        <View>
+                          <Text
+                            style={[
+                              styles.foodRowName,
+                              isSelected && styles.foodRowNameSelected,
+                            ]}
+                          >
+                            {item.name}
+                          </Text>
+                          <Text style={styles.foodRowSub}>{item.subLabel}</Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.foodRowRight}>
+                        <Text style={styles.foodGram}>{item.gramLabel}</Text>
+                        {isSelected ? (
+                          <Ionicons
+                            name="checkmark"
+                            size={18}
+                            color="#57A88C"
+                          />
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                {!isAddFoodFormVisible ? (
+                  <TouchableOpacity
+                    style={styles.addNewFoodButton}
+                    activeOpacity={0.85}
+                    onPress={() => setIsAddFoodFormVisible(true)}
+                  >
+                    <Ionicons name="add" size={16} color="#5D8A77" />
+                    <Text style={styles.addNewFoodText}>새 사료 추가하기</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={styles.addFoodForm}>
+                    <Text style={styles.addFoodFormTitle}>새 사료 입력</Text>
+
+                    <TextInput
+                      style={styles.addFoodInput}
+                      placeholder="사료 이름 입력"
+                      placeholderTextColor="#A1AAA6"
+                      value={newFoodName}
+                      onChangeText={setNewFoodName}
+                    />
+
+                    <TextInput
+                      style={styles.addFoodInput}
+                      placeholder="권장 급여량 입력 (예: 40)"
+                      placeholderTextColor="#A1AAA6"
+                      value={newFoodGram}
+                      onChangeText={(text) =>
+                        setNewFoodGram(text.replace(/[^0-9]/g, ""))
+                      }
+                      keyboardType="numeric"
+                    />
+
+                    <View style={styles.addFoodButtonRow}>
+                      <TouchableOpacity
+                        style={styles.addFoodCancelButton}
+                        activeOpacity={0.85}
+                        onPress={() => {
+                          setIsAddFoodFormVisible(false);
+                          setNewFoodName("");
+                          setNewFoodGram("");
+                        }}
+                      >
+                        <Text style={styles.addFoodCancelButtonText}>취소</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.addFoodSaveButton}
+                        activeOpacity={0.85}
+                        onPress={handleAddNewFood}
+                      >
+                        <Text style={styles.addFoodSaveButtonText}>추가</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+              </ScrollView>
+
+              <TouchableOpacity
+                style={styles.completeButton}
+                activeOpacity={0.9}
+                onPress={handleCompleteFoodSelection}
+              >
+                <Text style={styles.completeButtonText}>선택 완료</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        {Platform.OS === "android" ? (
+          isTimePickerVisible ? (
+            <DateTimePicker
+              value={selectedTime}
+              mode="time"
+              display="spinner"
+              onChange={handleTimeChange}
+            />
+          ) : null
+        ) : (
+          <Modal
+            visible={isTimePickerVisible}
+            transparent
+            animationType="slide"
+            onRequestClose={() => setIsTimePickerVisible(false)}
+          >
+            <View style={styles.nestedModalOverlay}>
+              <Pressable
+                style={styles.modalBackdrop}
+                onPress={() => setIsTimePickerVisible(false)}
+              />
+
+              <View
+                style={[
+                  styles.timePickerSheet,
+                  { paddingBottom: insets.bottom + 10 },
+                ]}
+              >
+                <View style={styles.sheetHandle} />
+                <Text style={styles.foodSheetTitle}>시간 선택</Text>
+
+                <DateTimePicker
+                  value={selectedTime}
+                  mode="time"
+                  display="spinner"
+                  onChange={handleTimeChange}
+                  style={styles.iosPicker}
+                />
+
+                <TouchableOpacity
+                  style={styles.completeButton}
+                  activeOpacity={0.9}
+                  onPress={() => setIsTimePickerVisible(false)}
+                >
+                  <Text style={styles.completeButtonText}>선택 완료</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Modal>
+        )}
       </Modal>
     </SafeAreaView>
   );
@@ -652,10 +1041,66 @@ const styles = StyleSheet.create({
     fontFamily: "Nanum",
     color: "#B1722F",
   },
+  noticeRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   noticeLink: {
     fontSize: 15,
     fontFamily: "Nanum",
     color: "#D06B33",
+    marginRight: 2,
+  },
+
+  alarmPreviewBox: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#F1F0F0",
+    borderRadius: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    marginBottom: 30,
+  },
+  alarmBellIcon: {
+    marginRight: 10,
+  },
+  alarmPreviewLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  alarmPreviewTime: {
+    width: 78,
+    fontSize: 22,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+  alarmPreviewTextWrap: {
+    flex: 1,
+  },
+  alarmPreviewMeta: {
+    fontSize: 11,
+    fontFamily: "Nanum",
+    color: "#7C7C7C",
+    marginBottom: 2,
+  },
+  alarmPreviewFood: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#222222",
+  },
+  alarmPreviewEditWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    marginLeft: 12,
+  },
+  alarmPreviewEditText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#D06B33",
+    marginRight: 2,
   },
 
   emptyWrap: {
@@ -736,10 +1181,15 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "flex-end",
   },
+  nestedModalOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+  },
   modalBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: "rgba(0,0,0,0.18)",
   },
+
   bottomSheet: {
     height: 300,
     backgroundColor: "#FFFFFF",
@@ -748,6 +1198,22 @@ const styles = StyleSheet.create({
     paddingTop: 18,
     paddingHorizontal: 16,
   },
+  foodSheet: {
+    height: 520,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 14,
+    paddingHorizontal: 16,
+  },
+  timePickerSheet: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 14,
+    paddingHorizontal: 16,
+  },
+
   sheetHandle: {
     alignSelf: "center",
     width: 42,
@@ -766,17 +1232,24 @@ const styles = StyleSheet.create({
     color: "#222222",
     marginBottom: 14,
   },
+  foodSheetTitle: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#222222",
+    marginBottom: 14,
+  },
 
   fieldGroup: {
     marginBottom: 10,
   },
   inputBox: {
-    height: 44,
+    minHeight: 44,
     borderWidth: 1,
     borderColor: "#2F6B57",
     borderRadius: 10,
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 12,
+    paddingVertical: 10,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -790,55 +1263,34 @@ const styles = StyleSheet.create({
     color: "#7F8A84",
   },
 
-  dropdownBox: {
-    marginTop: 6,
-    borderWidth: 1,
-    borderColor: "#D6E2DC",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    overflow: "hidden",
-  },
-  dropdownItem: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#EEF2F0",
-  },
-  dropdownItemText: {
-    fontSize: 13,
-    fontFamily: "Nanum",
-    color: "#222222",
-  },
-
-  customFoodRow: {
+  selectedFoodInline: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-  },
-  customFoodInput: {
     flex: 1,
-    height: 44,
-    borderWidth: 1,
-    borderColor: "#2F6B57",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    fontSize: 13,
-    fontFamily: "Nanum",
-    color: "#222222",
+    marginRight: 8,
   },
-  customFoodCancelButton: {
-    width: 64,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: "#2F6B57",
+  selectedFoodIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: "#EAF4FF",
     justifyContent: "center",
     alignItems: "center",
+    marginRight: 8,
   },
-  customFoodCancelText: {
-    fontSize: 13,
+  selectedFoodTextWrap: {
+    flex: 1,
+  },
+  selectedFoodName: {
+    fontSize: 14,
     fontFamily: "NanumB",
-    color: "#FFFFFF",
+    color: "#2E6955",
+  },
+  selectedFoodSub: {
+    marginTop: 2,
+    fontSize: 11,
+    fontFamily: "Nanum",
+    color: "#98A39D",
   },
 
   amountBox: {
@@ -913,5 +1365,162 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "NanumB",
     color: "#FFFFFF",
+  },
+
+  foodList: {
+    flex: 1,
+  },
+  foodListContent: {
+    paddingBottom: 12,
+  },
+  foodRow: {
+    minHeight: 58,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    backgroundColor: "#FFFFFF",
+  },
+  foodRowSelected: {
+    backgroundColor: "#EEF7F3",
+    borderWidth: 1,
+    borderColor: "#9CC8B6",
+  },
+  foodRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+  },
+  foodRadio: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#D2D7D5",
+    marginRight: 10,
+  },
+  foodRadioSelected: {
+    backgroundColor: "#3D8B70",
+  },
+  foodRowName: {
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#333333",
+  },
+  foodRowNameSelected: {
+    color: "#2F6B57",
+  },
+  foodRowSub: {
+    marginTop: 3,
+    fontSize: 11,
+    fontFamily: "Nanum",
+    color: "#9CA4A0",
+  },
+  foodRowRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 10,
+  },
+  foodGram: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#A3AAA7",
+    marginRight: 8,
+  },
+
+  addNewFoodButton: {
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#C8D8D1",
+    backgroundColor: "#FBFCFC",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 4,
+  },
+  addNewFoodText: {
+    marginLeft: 6,
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#5D8A77",
+  },
+
+  addFoodForm: {
+    marginTop: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#DCE7E1",
+    backgroundColor: "#F9FCFA",
+    padding: 14,
+  },
+  addFoodFormTitle: {
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    marginBottom: 12,
+  },
+  addFoodInput: {
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#D8E2DD",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    fontSize: 13,
+    fontFamily: "Nanum",
+    color: "#222222",
+    marginBottom: 10,
+  },
+  addFoodButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 4,
+  },
+  addFoodCancelButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#D9D9D9",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addFoodCancelButtonText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#333333",
+  },
+  addFoodSaveButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#2F6B57",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addFoodSaveButtonText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#FFFFFF",
+  },
+
+  completeButton: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#2F7A5F",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  completeButtonText: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#FFFFFF",
+  },
+  iosPicker: {
+    alignSelf: "center",
   },
 });

@@ -59,6 +59,8 @@ export default function DeleteAccountScreen() {
       await AsyncStorage.removeItem(`petProfileDraft_${currentUser.email}`);
       await AsyncStorage.removeItem(`profileCompleted_${currentUser.email}`);
       await AsyncStorage.removeItem(`petProfiles_${currentUser.email}`);
+      await AsyncStorage.removeItem(`feeding_alarms_${currentUser.email}`);
+      await AsyncStorage.removeItem(`feedingRecords_${currentUser.email}`);
 
       Alert.alert("탈퇴 완료", "계정이 삭제되었습니다.", [
         {

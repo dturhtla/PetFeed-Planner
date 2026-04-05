@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -88,7 +88,7 @@ export default function AnalysisResultScreen() {
   const [foodInfo, setFoodInfo] = useState<FoodInfo | null>(null);
   const [feeding, setFeeding] = useState<FeedingRecommendation | null>(null);
 
-  const analyzeFood = async () => {
+  const analyzeFood = useCallback(async () => {
     try {
       console.log("analyzeFood 시작");
       setIsLoading(true);
@@ -203,13 +203,13 @@ export default function AnalysisResultScreen() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [imageUri]);
 
   useEffect(() => {
     console.log("useEffect 실행됨");
     console.log("imageUri:", imageUri);
     analyzeFood();
-  }, [imageUri]);
+  }, [analyzeFood, imageUri]);
 
   if (!imageUri) {
     return (

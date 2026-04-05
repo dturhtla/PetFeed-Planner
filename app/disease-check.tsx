@@ -124,7 +124,7 @@ export default function DiseaseCheckScreen() {
         !baseProfile.bcs
       ) {
         Alert.alert("알림", "프로필 정보가 완전하지 않습니다.");
-        router.replace("/profile" as any);
+        router.replace("/profile-complete" as any);
         return;
       }
 
@@ -163,7 +163,7 @@ export default function DiseaseCheckScreen() {
       await AsyncStorage.setItem(profilesKey, JSON.stringify(updatedProfiles));
       await AsyncStorage.setItem(completedKey, "true");
 
-      router.replace("/profile" as any);
+      router.replace("/profile-complete" as any);
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "질병 정보 저장 중 오류가 발생했습니다.");
