@@ -75,10 +75,22 @@ async def analyze_food_image(image_b64: str) -> FoodAnalysisResult:
 
     food = FoodAnalysisResult(**result_dict)
 
-    # 칼로리 인식 못했으면 제품명으로 검색해서 가져오기
+    # 칼로리 인식 못했으면 제품명으로 검색
     if food.calories_per_100g is None and food.product_name and food.brand:
         food.calories_per_100g = await search_product_calories(
             food.brand, food.product_name
+        )
+
+    # 단백질 인식 못했으면 제품명으로 검색
+    if food.protein_pct is None and food.product_name and food.brand:
+        food.protein_pct = await search_product_nutrition(
+            food.brand, food.product_name, "조단백질"
+        )
+
+    # 지방 인식 못했으면 제품명으로 검색
+    if food.fat_pct is None and food.product_name and food.brand:
+        food.fat_pct = await search_product_nutrition(
+            food.brand, food.product_name, "조지방"
         )
 
     return food
@@ -92,11 +104,17 @@ async def search_product_calories(brand: str, product_name: str) -> float | None
 브랜드: {brand}
 제품명: {product_name}
 
-이 제품의 100g당 칼로리(kcal)를 숫자만 반환해주세요.
-예: 385
+주의사항:
+- 해당 제품의 공식 칼로리 정보를 최우선으로 사용해주세요
+- 공식 정보를 찾지 못하면 동일 브랜드 유사 제품 기준으로 추정해주세요
+- kcal/kg 단위로 나와있으면 반드시 10으로 나눠서 100g 단위로 변환해주세요
+- 예: 3525kcal/kg → 352.5kcal/100g
+- 절대로 null을 반환하지 마세요. 반드시 숫자를 반환해주세요
 
-모르면 null을 반환해주세요.
-다른 텍스트 없이 숫자 또는 null만 반환해야 합니다."""
+이 제품의 100g당 칼로리(kcal)를 숫자만 반환해주세요.
+예: 352.5
+
+다른 텍스트 없이 숫자만 반환해야 합니다."""
 
     response = client.models.generate_content(
         model="gemini-2.5-flash",
@@ -106,8 +124,40 @@ async def search_product_calories(brand: str, product_name: str) -> float | None
     result = response.text.strip()
 
     try:
-        if result.lower() == "null":
-            return None
+        return float(result)
+    except ValueError:
+        return None
+
+
+async def search_product_nutrition(brand: str, product_name: str, nutrient: str) -> float | None:
+    """제품명으로 영양성분 검색 (단백질, 지방 등)"""
+
+    prompt = f"""반려동물 사료 제품의 영양성분 정보를 알려주세요.
+
+브랜드: {brand}
+제품명: {product_name}
+찾는 영양성분: {nutrient}
+
+주의사항:
+- 해당 제품의 공식 영양성분 정보를 최우선으로 사용해주세요
+- 공식 정보를 찾지 못하면 동일 브랜드 유사 제품 기준으로 추정해주세요
+- 반드시 % 단위로 반환해주세요
+- 같은 제품이라도 시기별로 성분이 다를 수 있으므로 가장 최신 정보를 사용해주세요
+- 절대로 null을 반환하지 마세요. 반드시 숫자를 반환해주세요
+
+이 제품의 {nutrient} 함량(%)을 숫자만 반환해주세요.
+예: 32.5
+
+다른 텍스트 없이 숫자만 반환해야 합니다."""
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+
+    result = response.text.strip()
+
+    try:
         return float(result)
     except ValueError:
         return None
