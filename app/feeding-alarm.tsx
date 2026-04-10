@@ -1,7 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -104,8 +104,8 @@ const KOR_TO_WEEKDAY: Record<string, number> = {
   토: 7,
 };
 
-function getAlarmsKey(email: string) {
-  return `feeding_alarms_${email}`;
+function getAlarmsKey(email: string, petId: string) {
+  return `feeding_alarms_${email}_${petId}`;
 }
 
 function to24Hour(period: "오전" | "오후", hour: string) {
@@ -321,6 +321,10 @@ function EditableTimeWheel({
 
 export default function FeedingAlarmScreen() {
   const insets = useSafeAreaInsets();
+  const { petId, petName } = useLocalSearchParams<{
+    petId?: string;
+    petName?: string;
+  }>();
 
   const periodRef = useRef<ScrollView>(null);
   const hourRef = useRef<ScrollView>(null);
@@ -381,12 +385,14 @@ export default function FeedingAlarmScreen() {
   useEffect(() => {
     const loadUserAndAlarms = async () => {
       try {
+        setIsLoaded(false);
+
         const savedUser = await AsyncStorage.getItem("loggedInUser");
         const parsedUser: LoggedInUser | null = savedUser
           ? JSON.parse(savedUser)
           : null;
 
-        if (!parsedUser?.email) {
+        if (!parsedUser?.email || !petId || typeof petId !== "string") {
           setUserEmail("");
           setAlarms([]);
           return;
@@ -395,7 +401,7 @@ export default function FeedingAlarmScreen() {
         const email = parsedUser.email;
         setUserEmail(email);
 
-        const alarmsKey = getAlarmsKey(email);
+        const alarmsKey = getAlarmsKey(email, petId);
         const saved = await AsyncStorage.getItem(alarmsKey);
 
         if (saved) {
@@ -416,7 +422,7 @@ export default function FeedingAlarmScreen() {
     };
 
     loadUserAndAlarms();
-  }, []);
+  }, [petId]);
 
   useEffect(() => {
     const onBackPress = () => {
@@ -448,11 +454,11 @@ export default function FeedingAlarmScreen() {
   }, [isDeleteMode, isFoodSheetVisible, isFormVisible]);
 
   useEffect(() => {
-    if (!isLoaded || !userEmail) return;
+    if (!isLoaded || !userEmail || !petId || typeof petId !== "string") return;
 
     const saveAndSync = async () => {
       try {
-        const alarmsKey = getAlarmsKey(userEmail);
+        const alarmsKey = getAlarmsKey(userEmail, petId);
         await AsyncStorage.setItem(alarmsKey, JSON.stringify(alarms));
         await syncFeedingAlarmNotifications(alarms);
       } catch (error) {
@@ -461,7 +467,7 @@ export default function FeedingAlarmScreen() {
     };
 
     saveAndSync();
-  }, [alarms, isLoaded, userEmail]);
+  }, [alarms, isLoaded, userEmail, petId]);
 
   useEffect(() => {
     if (!isFormVisible || editingTimeField !== null) return;
@@ -1144,7 +1150,9 @@ export default function FeedingAlarmScreen() {
           <Ionicons name="chevron-back" size={24} color="#2F6B57" />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>알람</Text>
+        <Text style={styles.headerTitle}>
+          {petName && typeof petName === "string" ? `${petName} 알람` : "알람"}
+        </Text>
 
         <View style={styles.headerRight}>
           <View style={styles.headerPlaceholder} />

@@ -20,6 +20,7 @@ type GenderType = "남" | "여" | "중성화" | "";
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
 type PickerType = "year" | "month" | null;
+type ProfileEntryMode = "signup" | "add";
 
 type LoggedInUser = {
   id: string;
@@ -63,6 +64,10 @@ export default function ProfileScreen() {
 
   const forceInputMode = params?.forceInput === "true";
 
+  const requestedEntryMode = useMemo<ProfileEntryMode>(() => {
+    return params?.entryMode === "add" ? "add" : "signup";
+  }, [params?.entryMode]);
+
   const returnedSelectedBcs = useMemo(() => {
     return typeof params?.selectedBcs === "string"
       ? (params.selectedBcs as BcsLabel)
@@ -94,6 +99,8 @@ export default function ProfileScreen() {
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [userEmail, setUserEmail] = useState("");
+  const [profileEntryMode, setProfileEntryMode] =
+    useState<ProfileEntryMode>("signup");
 
   const [profiles, setProfiles] = useState<ProfileData[]>([]);
   const [isFirstInputMode, setIsFirstInputMode] = useState(false);
@@ -118,6 +125,7 @@ export default function ProfileScreen() {
   const getProfileKey = (email: string) => `petProfile_${email}`;
   const getProfilesKey = (email: string) => `petProfiles_${email}`;
   const getCompletedKey = (email: string) => `profileCompleted_${email}`;
+  const getFlowModeKey = (email: string) => `petProfileFlowMode_${email}`;
 
   const normalizeName = (value: string) => value.trim();
   const isValidName = (value: string) => /^[a-zA-Z가-힣\s]+$/.test(value);
@@ -335,6 +343,7 @@ export default function ProfileScreen() {
     };
 
     await AsyncStorage.setItem(getDraftKey(userEmail), JSON.stringify(draft));
+    await AsyncStorage.setItem(getFlowModeKey(userEmail), profileEntryMode);
   };
 
   const loadProfile = useCallback(async () => {
@@ -353,6 +362,7 @@ export default function ProfileScreen() {
       const savedProfile = await AsyncStorage.getItem(getProfileKey(email));
       const savedDraft = await AsyncStorage.getItem(getDraftKey(email));
       const savedProfiles = await AsyncStorage.getItem(getProfilesKey(email));
+      const savedFlowMode = await AsyncStorage.getItem(getFlowModeKey(email));
 
       const parsedProfile = savedProfile ? JSON.parse(savedProfile) : null;
       const parsedDraft = savedDraft ? JSON.parse(savedDraft) : null;
@@ -362,9 +372,18 @@ export default function ProfileScreen() {
           ? [parsedProfile]
           : [];
 
+      const storedFlowMode: ProfileEntryMode =
+        savedFlowMode === "add" ? "add" : "signup";
+
       setProfiles(parsedProfiles);
 
       if (forceInputMode || parsedProfiles.length === 0) {
+        const nextMode: ProfileEntryMode =
+          forceInputMode && requestedEntryMode === "add" ? "add" : "signup";
+
+        await AsyncStorage.setItem(getFlowModeKey(email), nextMode);
+        setProfileEntryMode(nextMode);
+
         resetForm();
         setIsFirstInputMode(true);
         setIsEditMode(false);
@@ -388,6 +407,7 @@ export default function ProfileScreen() {
           setDiseases(returnedSelectedDiseases);
         }
 
+        setProfileEntryMode(storedFlowMode);
         setSelectedProfileIndex(returnedEditIndex);
         setIsFirstInputMode(false);
         setIsEditMode(true);
@@ -395,6 +415,7 @@ export default function ProfileScreen() {
         return;
       }
 
+      setProfileEntryMode("signup");
       setIsFirstInputMode(false);
       setIsEditMode(false);
       setSelectedProfileIndex(null);
@@ -409,6 +430,7 @@ export default function ProfileScreen() {
   }, [
     applyProfileData,
     forceInputMode,
+    requestedEntryMode,
     returnedEditIndex,
     returnedFromBcsEdit,
     returnedFromDiseaseEdit,
@@ -469,6 +491,7 @@ export default function ProfileScreen() {
         pathname: "/bcs-check",
         params: {
           petType,
+          mode: profileEntryMode,
         },
       } as any);
     } catch (error) {
@@ -521,13 +544,23 @@ export default function ProfileScreen() {
     try {
       await saveDraft();
 
+      if (selectedProfileIndex !== null) {
+        router.push({
+          pathname: "/disease-check",
+          params: {
+            from: "profile",
+            selectedDiseases: JSON.stringify(diseases),
+            editIndex: String(selectedProfileIndex),
+          },
+        } as any);
+        return;
+      }
+
       router.push({
         pathname: "/disease-check",
         params: {
-          from: "profile",
+          mode: profileEntryMode,
           selectedDiseases: JSON.stringify(diseases),
-          editIndex:
-            selectedProfileIndex !== null ? String(selectedProfileIndex) : "",
         },
       } as any);
     } catch (error) {
@@ -576,6 +609,7 @@ export default function ProfileScreen() {
         JSON.stringify(finalProfile),
       );
       await AsyncStorage.setItem(getCompletedKey(userEmail), "true");
+      await AsyncStorage.removeItem(getFlowModeKey(userEmail));
 
       setProfiles(updatedProfiles);
       setIsEditMode(false);
@@ -609,6 +643,7 @@ export default function ProfileScreen() {
             await AsyncStorage.removeItem(getProfileKey(userEmail));
             await AsyncStorage.removeItem(getDraftKey(userEmail));
             await AsyncStorage.removeItem(getCompletedKey(userEmail));
+            await AsyncStorage.removeItem(getFlowModeKey(userEmail));
 
             setProfiles([]);
             resetForm();
@@ -645,8 +680,10 @@ export default function ProfileScreen() {
 
     await AsyncStorage.removeItem(getProfileKey(userEmail));
     await AsyncStorage.removeItem(getDraftKey(userEmail));
+    await AsyncStorage.setItem(getFlowModeKey(userEmail), "add");
 
     resetForm();
+    setProfileEntryMode("add");
     setIsFirstInputMode(true);
     setIsEditMode(false);
     setSelectedProfileIndex(null);

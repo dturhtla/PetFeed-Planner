@@ -20,6 +20,17 @@ type User = {
   password: string;
 };
 
+type PetProfile = {
+  id?: string | number;
+  name?: string;
+  age?: string;
+  weight?: string;
+  gender?: string;
+  petType?: string;
+  bcs?: string;
+  diseases?: string[];
+};
+
 export default function DeleteAccountScreen() {
   const router = useRouter();
   const [password, setPassword] = useState("");
@@ -54,12 +65,30 @@ export default function DeleteAccountScreen() {
 
       await AsyncStorage.setItem("users", JSON.stringify(updatedUsers));
 
+      // 먼저 반려동물 목록을 읽어서 pet별 알람 key 제거
+      const savedProfiles = await AsyncStorage.getItem(
+        `petProfiles_${currentUser.email}`,
+      );
+      const parsedProfiles: PetProfile[] = savedProfiles
+        ? JSON.parse(savedProfiles)
+        : [];
+
+      for (let i = 0; i < parsedProfiles.length; i++) {
+        const petId = String(parsedProfiles[i].id ?? i + 1);
+        await AsyncStorage.removeItem(
+          `feeding_alarms_${currentUser.email}_${petId}`,
+        );
+      }
+
+      // 혹시 예전 구조/단일 프로필 구조에서 남아 있을 수 있는 key도 같이 제거
+      await AsyncStorage.removeItem(`feeding_alarms_${currentUser.email}`);
+
       await AsyncStorage.removeItem("loggedInUser");
       await AsyncStorage.removeItem(`petProfile_${currentUser.email}`);
       await AsyncStorage.removeItem(`petProfileDraft_${currentUser.email}`);
       await AsyncStorage.removeItem(`profileCompleted_${currentUser.email}`);
       await AsyncStorage.removeItem(`petProfiles_${currentUser.email}`);
-      await AsyncStorage.removeItem(`feeding_alarms_${currentUser.email}`);
+      await AsyncStorage.removeItem(`petProfileFlowMode_${currentUser.email}`);
       await AsyncStorage.removeItem(`feedingRecords_${currentUser.email}`);
 
       Alert.alert("탈퇴 완료", "계정이 삭제되었습니다.", [

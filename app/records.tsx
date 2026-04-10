@@ -1,4 +1,4 @@
-import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import DateTimePicker, {
   DateTimePickerEvent,
@@ -44,6 +44,7 @@ type FeedingRecord = {
   foodName: string;
   amount: string;
   time: string;
+  sortKey?: number;
 };
 
 type FoodItem = {
@@ -100,8 +101,10 @@ const DEFAULT_FOOD_LIBRARY: FoodItem[] = [
   },
 ];
 
-const getAlarmKey = (email: string) => `feeding_alarms_${email}`;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+
+const getAlarmKey = (email: string, petId: string) =>
+  `feeding_alarms_${email}_${petId}`;
 
 function createInitialTime() {
   const date = new Date();
@@ -167,6 +170,23 @@ function getNearestUpcomingAlarm(alarms: AlarmItem[]) {
   return nearest?.alarm ?? null;
 }
 
+function getTodayKorDay() {
+  return DAYS[new Date().getDay()];
+}
+
+function getAlarmSortValue(alarm: AlarmItem) {
+  return to24Hour(alarm.period, alarm.hour) * 60 + Number(alarm.minute);
+}
+
+function createDateFromAlarm(alarm: AlarmItem) {
+  const date = new Date();
+  date.setHours(to24Hour(alarm.period, alarm.hour));
+  date.setMinutes(Number(alarm.minute));
+  date.setSeconds(0);
+  date.setMilliseconds(0);
+  return date;
+}
+
 export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
 
@@ -178,11 +198,15 @@ export default function RecordsScreen() {
 
   const [nearestAlarm, setNearestAlarm] = useState<AlarmItem | null>(null);
   const [hasAnyEnabledAlarm, setHasAnyEnabledAlarm] = useState(false);
+  const [todayFeedingSchedules, setTodayFeedingSchedules] = useState<
+    AlarmItem[]
+  >([]);
 
   const [isAddModalVisible, setIsAddModalVisible] = useState(false);
   const [isFoodSheetVisible, setIsFoodSheetVisible] = useState(false);
   const [isTimePickerVisible, setIsTimePickerVisible] = useState(false);
   const [isAddFoodFormVisible, setIsAddFoodFormVisible] = useState(false);
+  const [isFromAlarm, setIsFromAlarm] = useState(false);
 
   const [foodLibrary, setFoodLibrary] =
     useState<FoodItem[]>(DEFAULT_FOOD_LIBRARY);
@@ -230,6 +254,7 @@ export default function RecordsScreen() {
     setIsAddFoodFormVisible(false);
     setNewFoodName("");
     setNewFoodGram("");
+    setIsFromAlarm(false);
   }, []);
 
   const closeAddModal = useCallback(() => {
@@ -283,6 +308,7 @@ export default function RecordsScreen() {
         setRecords([]);
         setNearestAlarm(null);
         setHasAnyEnabledAlarm(false);
+        setTodayFeedingSchedules([]);
         return;
       }
 
@@ -297,7 +323,6 @@ export default function RecordsScreen() {
         `petProfile_${email}`,
       );
       const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
-      const savedAlarms = await AsyncStorage.getItem(getAlarmKey(email));
 
       let loadedProfiles: PetProfileItem[] = [];
 
@@ -349,16 +374,6 @@ export default function RecordsScreen() {
       } else {
         setRecords([]);
       }
-
-      const parsedAlarms: AlarmItem[] = savedAlarms
-        ? JSON.parse(savedAlarms)
-        : [];
-      const enabledAlarms = Array.isArray(parsedAlarms)
-        ? parsedAlarms.filter((alarm) => alarm.enabled)
-        : [];
-
-      setHasAnyEnabledAlarm(enabledAlarms.length > 0);
-      setNearestAlarm(getNearestUpcomingAlarm(enabledAlarms));
     } catch (error) {
       console.log(error);
     }
@@ -370,11 +385,59 @@ export default function RecordsScreen() {
     }, [loadProfilesAndRecords]),
   );
 
+  useFocusEffect(
+    useCallback(() => {
+      const loadPetAlarms = async () => {
+        try {
+          if (!userEmail || !selectedPetId) {
+            setNearestAlarm(null);
+            setHasAnyEnabledAlarm(false);
+            setTodayFeedingSchedules([]);
+            return;
+          }
+
+          const savedAlarms = await AsyncStorage.getItem(
+            getAlarmKey(userEmail, selectedPetId),
+          );
+
+          const parsedAlarms: AlarmItem[] = savedAlarms
+            ? JSON.parse(savedAlarms)
+            : [];
+
+          const enabledAlarms = Array.isArray(parsedAlarms)
+            ? parsedAlarms.filter((alarm) => alarm.enabled)
+            : [];
+
+          setHasAnyEnabledAlarm(enabledAlarms.length > 0);
+          setNearestAlarm(getNearestUpcomingAlarm(enabledAlarms));
+
+          const todayKor = getTodayKorDay();
+          const todaySchedules = enabledAlarms
+            .filter((alarm) => alarm.days?.includes(todayKor))
+            .sort((a, b) => getAlarmSortValue(a) - getAlarmSortValue(b));
+
+          setTodayFeedingSchedules(todaySchedules);
+        } catch (error) {
+          console.log(error);
+          setNearestAlarm(null);
+          setHasAnyEnabledAlarm(false);
+          setTodayFeedingSchedules([]);
+        }
+      };
+
+      loadPetAlarms();
+    }, [userEmail, selectedPetId]),
+  );
+
   const filteredRecords = useMemo(() => {
     return records
       .filter((record) => record.petId === selectedPetId)
       .slice()
-      .reverse();
+      .sort((a, b) => {
+        const aKey = a.sortKey ?? Number(a.id) ?? 0;
+        const bKey = b.sortKey ?? Number(b.id) ?? 0;
+        return bKey - aKey;
+      });
   }, [records, selectedPetId]);
 
   const selectedPet = useMemo(() => {
@@ -382,9 +445,23 @@ export default function RecordsScreen() {
   }, [petProfiles, selectedPetId]);
 
   const handleSaveRecord = async () => {
-    if (!userEmail || !selectedPetId) return;
-    if (!selectedFood) return;
-    if (!amount.trim()) return;
+    if (!userEmail || !selectedPetId) {
+      console.log("저장실패: userEmail 또는 selectedPetId 없음", {
+        userEmail,
+        selectedPetId,
+      });
+      return;
+    }
+
+    if (!selectedFood) {
+      console.log("저장실패: selectedFood 없음");
+      return;
+    }
+
+    if (!amount.trim()) {
+      console.log("저장 실패: amount 비어 있음");
+      return;
+    }
 
     try {
       const newRecord: FeedingRecord = {
@@ -394,6 +471,7 @@ export default function RecordsScreen() {
         foodName: selectedFood.name,
         amount: `${amount}g`,
         time: formatDisplayTime(selectedTime),
+        sortKey: Date.now(),
       };
 
       const updatedRecords = [...records, newRecord];
@@ -406,7 +484,7 @@ export default function RecordsScreen() {
 
       closeAddModal();
     } catch (error) {
-      console.log(error);
+      console.log("handleSaveRecord error: ", error);
     }
   };
 
@@ -477,6 +555,31 @@ export default function RecordsScreen() {
     setNewFoodGram("");
   };
 
+  const handlePressRecordFromSchedule = (alarm: AlarmItem) => {
+    const foundFood = foodLibrary.find(
+      (item) => item.name === alarm.foodName,
+    ) ?? {
+      id: `temp-${alarm.id}`,
+      name: alarm.foodName,
+      subLabel: alarm.foodSubLabel,
+      gramLabel:
+        alarm.foodSubLabel.replace(/[^0-9g]/g, "") || alarm.foodSubLabel,
+    };
+
+    setIsFromAlarm(true);
+    setSelectedFood(foundFood);
+    setTempSelectedFood(foundFood);
+    setAmount(String(alarm.amount));
+    setSelectedTime(createDateFromAlarm(alarm));
+    setIsAddModalVisible(true);
+  };
+
+  const handlePressAddButton = () => {
+    resetAddForm();
+    setIsFromAlarm(false);
+    setIsAddModalVisible(true);
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
@@ -544,7 +647,15 @@ export default function RecordsScreen() {
           <TouchableOpacity
             style={styles.noticeBox}
             activeOpacity={0.85}
-            onPress={() => router.push("/feeding-alarm")}
+            onPress={() =>
+              router.push({
+                pathname: "/feeding-alarm",
+                params: {
+                  petId: selectedPetId,
+                  petName: selectedPet?.name ?? "",
+                },
+              })
+            }
           >
             <View style={styles.noticeLeft}>
               <Ionicons
@@ -564,7 +675,15 @@ export default function RecordsScreen() {
           <TouchableOpacity
             style={styles.alarmPreviewBox}
             activeOpacity={0.85}
-            onPress={() => router.push("/feeding-alarm")}
+            onPress={() =>
+              router.push({
+                pathname: "/feeding-alarm",
+                params: {
+                  petId: selectedPetId,
+                  petName: selectedPet?.name ?? "",
+                },
+              })
+            }
           >
             <View style={styles.alarmPreviewLeft}>
               <Ionicons
@@ -598,7 +717,46 @@ export default function RecordsScreen() {
           </TouchableOpacity>
         )}
 
-        {filteredRecords.length === 0 ? (
+        <View style={styles.recordSectionHeader}>
+          <Text style={styles.recordSectionTitle}>기록 내역</Text>
+        </View>
+
+        {todayFeedingSchedules.length > 0 ? (
+          <View style={styles.scheduleList}>
+            {todayFeedingSchedules.map((alarm) => (
+              <View key={alarm.id} style={styles.scheduleCard}>
+                <View style={styles.scheduleBar} />
+
+                <View style={styles.scheduleInner}>
+                  <View style={styles.scheduleTextWrap}>
+                    <Text style={styles.scheduleTime}>
+                      {formatAlarmDisplayTime(alarm)} 예정
+                    </Text>
+                    <Text style={styles.scheduleFood}>{alarm.foodName}</Text>
+                    <Text style={styles.scheduleSub}>
+                      {alarm.amount}g | {alarm.feedingType}식사
+                    </Text>
+                  </View>
+
+                  <TouchableOpacity
+                    style={styles.scheduleAction}
+                    activeOpacity={0.85}
+                    onPress={() => handlePressRecordFromSchedule(alarm)}
+                  >
+                    <Text style={styles.scheduleActionText}>급여 기록하기</Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
+                      color="#2F6B57"
+                    />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {filteredRecords.length === 0 && todayFeedingSchedules.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyTitle}>아직 급여 기록이 없어요</Text>
             <Text style={styles.emptyDesc}>
@@ -630,7 +788,7 @@ export default function RecordsScreen() {
           },
         ]}
         activeOpacity={0.85}
-        onPress={() => setIsAddModalVisible(true)}
+        onPress={handlePressAddButton}
       >
         <Ionicons name="add" size={22} color="#FFFFFF" />
       </TouchableOpacity>
@@ -650,95 +808,80 @@ export default function RecordsScreen() {
           >
             <View style={styles.sheetHandle} />
 
-            <View style={styles.contentWrap}>
-              <Text style={styles.sheetTitle}>새 급여 기록하기</Text>
+            <View style={styles.recordSheetContent}>
+              <Text style={styles.recordSheetTitle}>
+                {isFromAlarm ? "급여 기록하기" : "급여 기록 추가"}
+              </Text>
 
-              <View style={styles.fieldGroup}>
-                <TouchableOpacity
-                  style={styles.inputBox}
-                  activeOpacity={0.85}
-                  onPress={openFoodSheet}
+              <TouchableOpacity
+                style={styles.recordSelectBox}
+                activeOpacity={0.85}
+                onPress={openFoodSheet}
+              >
+                <Text
+                  style={[
+                    styles.recordSelectText,
+                    !selectedFood && styles.recordPlaceholderText,
+                  ]}
+                  numberOfLines={1}
                 >
-                  {selectedFood ? (
-                    <View style={styles.selectedFoodInline}>
-                      <View style={styles.selectedFoodIconWrap}>
-                        <MaterialCommunityIcons
-                          name="food-drumstick"
-                          size={18}
-                          color="#5A9EDB"
-                        />
-                      </View>
+                  {selectedFood ? selectedFood.name : "(사료이름)"}
+                </Text>
 
-                      <View style={styles.selectedFoodTextWrap}>
-                        <Text style={styles.selectedFoodName}>
-                          {selectedFood.name}
-                        </Text>
-                        <Text style={styles.selectedFoodSub}>
-                          {selectedFood.subLabel}
-                        </Text>
-                      </View>
-                    </View>
-                  ) : (
-                    <Text style={[styles.inputText, styles.placeholderText]}>
-                      사료 선택하기
-                    </Text>
-                  )}
+                <Ionicons name="chevron-down" size={18} color="#2F6B57" />
+              </TouchableOpacity>
 
-                  <Ionicons name="chevron-down" size={18} color="#2F6B57" />
-                </TouchableOpacity>
-              </View>
+              <View style={styles.recordAmountBox}>
+                <Text style={styles.recordAmountLabel}>급여량</Text>
 
-              <View style={styles.amountBox}>
-                <Text style={styles.amountLabel}>급여량</Text>
-
-                <View style={styles.amountRight}>
+                <View style={styles.recordAmountControl}>
                   <TouchableOpacity
                     onPress={handleDecreaseAmount}
                     activeOpacity={0.8}
+                    style={styles.recordAmountIconButton}
                   >
                     <Ionicons name="remove-circle" size={20} color="#2F6B57" />
                   </TouchableOpacity>
 
-                  <View style={styles.amountValueWrap}>
-                    <Text style={styles.amountValue}>{amount}</Text>
-                    <Text style={styles.amountUnit}>g</Text>
-                  </View>
+                  <Text style={styles.recordAmountValue}>{amount}g</Text>
 
                   <TouchableOpacity
                     onPress={handleIncreaseAmount}
                     activeOpacity={0.8}
+                    style={styles.recordAmountIconButton}
                   >
                     <Ionicons name="add-circle" size={20} color="#2F6B57" />
                   </TouchableOpacity>
                 </View>
               </View>
 
-              <View style={styles.fieldGroup}>
-                <TouchableOpacity
-                  style={styles.inputBox}
-                  activeOpacity={0.85}
-                  onPress={() => setIsTimePickerVisible(true)}
-                >
-                  <Text style={styles.inputText}>
-                    시간 {formatDisplayTime(selectedTime)}
-                  </Text>
-                  <Ionicons name="chevron-down" size={18} color="#2F6B57" />
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity
+                style={styles.recordSelectBox}
+                activeOpacity={0.85}
+                onPress={() => setIsTimePickerVisible(true)}
+              >
+                <Text style={styles.recordSelectText}>
+                  시간 {formatDisplayTime(selectedTime)}
+                </Text>
 
-              <View style={styles.sheetButtonRow}>
+                <Ionicons name="chevron-down" size={18} color="#2F6B57" />
+              </TouchableOpacity>
+
+              <View style={styles.recordSheetButtonRow}>
                 <TouchableOpacity
-                  style={styles.cancelButton}
+                  style={styles.recordCancelButton}
                   onPress={closeAddModal}
+                  activeOpacity={0.85}
                 >
-                  <Text style={styles.cancelButtonText}>취소</Text>
+                  <Text style={styles.recordCancelButtonText}>취소</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.saveButton}
+                  style={styles.recordSaveButton}
                   onPress={handleSaveRecord}
+                  activeOpacity={0.85}
                 >
-                  <Text style={styles.saveButtonText}>저장</Text>
+                  <Text style={styles.recordSaveButtonText}>저장</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1029,7 +1172,7 @@ const styles = StyleSheet.create({
     borderColor: "#E8B68A",
     paddingHorizontal: 18,
     paddingVertical: 18,
-    marginBottom: 26,
+    marginBottom: 18,
   },
   noticeLeft: {
     flexDirection: "row",
@@ -1060,7 +1203,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingHorizontal: 20,
     paddingVertical: 20,
-    marginBottom: 30,
+    marginBottom: 18,
   },
   alarmBellIcon: {
     marginRight: 10,
@@ -1103,8 +1246,75 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
 
+  recordSectionHeader: {
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  recordSectionTitle: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#2F2F2F",
+  },
+
+  scheduleList: {
+    gap: 12,
+    marginBottom: 22,
+  },
+  scheduleCard: {
+    minHeight: 88,
+    backgroundColor: "#E9E9E9",
+    borderRadius: 16,
+    flexDirection: "row",
+    overflow: "hidden",
+  },
+  scheduleBar: {
+    width: 6,
+    backgroundColor: "#8F8F8F",
+  },
+  scheduleInner: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  scheduleTextWrap: {
+    flex: 1,
+    marginRight: 10,
+  },
+  scheduleTime: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#333333",
+    marginBottom: 6,
+  },
+  scheduleFood: {
+    fontSize: 18,
+    fontFamily: "NanumB",
+    color: "#222222",
+    marginBottom: 4,
+  },
+  scheduleSub: {
+    fontSize: 13,
+    fontFamily: "Nanum",
+    color: "#8C8C8C",
+  },
+  scheduleAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 12,
+  },
+  scheduleActionText: {
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    marginRight: 2,
+  },
+
   emptyWrap: {
-    minHeight: 470,
+    minHeight: 260,
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 24,
@@ -1222,149 +1432,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#C9C9C9",
     marginBottom: 14,
   },
-  contentWrap: {
-    flex: 1,
-    justifyContent: "flex-start",
-  },
-  sheetTitle: {
-    fontSize: 16,
-    fontFamily: "NanumB",
-    color: "#222222",
-    marginBottom: 14,
-  },
+
   foodSheetTitle: {
     fontSize: 16,
     fontFamily: "NanumB",
     color: "#222222",
     marginBottom: 14,
-  },
-
-  fieldGroup: {
-    marginBottom: 10,
-  },
-  inputBox: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderColor: "#2F6B57",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  inputText: {
-    fontSize: 13,
-    fontFamily: "Nanum",
-    color: "#222222",
-  },
-  placeholderText: {
-    color: "#7F8A84",
-  },
-
-  selectedFoodInline: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-    marginRight: 8,
-  },
-  selectedFoodIconWrap: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: "#EAF4FF",
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 8,
-  },
-  selectedFoodTextWrap: {
-    flex: 1,
-  },
-  selectedFoodName: {
-    fontSize: 14,
-    fontFamily: "NanumB",
-    color: "#2E6955",
-  },
-  selectedFoodSub: {
-    marginTop: 2,
-    fontSize: 11,
-    fontFamily: "Nanum",
-    color: "#98A39D",
-  },
-
-  amountBox: {
-    height: 44,
-    borderWidth: 1,
-    borderColor: "#2F6B57",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-  amountLabel: {
-    fontSize: 13,
-    fontFamily: "Nanum",
-    color: "#8A8A8A",
-  },
-  amountRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    width: 120,
-    justifyContent: "space-between",
-  },
-  amountValueWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 50,
-  },
-  amountValue: {
-    fontSize: 15,
-    fontFamily: "NanumB",
-    color: "#222222",
-    textAlign: "center",
-  },
-  amountUnit: {
-    marginLeft: 3,
-    fontSize: 13,
-    fontFamily: "NanumB",
-    color: "#222222",
-  },
-
-  sheetButtonRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 8,
-  },
-  cancelButton: {
-    flex: 1,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: "#D4D4D4",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  cancelButtonText: {
-    fontSize: 14,
-    fontFamily: "NanumB",
-    color: "#333333",
-  },
-  saveButton: {
-    flex: 1,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: "#2F6B57",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  saveButtonText: {
-    fontSize: 14,
-    fontFamily: "NanumB",
-    color: "#FFFFFF",
   },
 
   foodList: {
@@ -1522,5 +1595,101 @@ const styles = StyleSheet.create({
   },
   iosPicker: {
     alignSelf: "center",
+  },
+
+  recordSheetContent: {
+    flex: 1,
+    paddingTop: 4,
+  },
+  recordSheetTitle: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#111111",
+    marginBottom: 14,
+  },
+  recordSelectBox: {
+    height: 40,
+    borderWidth: 1.2,
+    borderColor: "#2F6B57",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  recordSelectText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Nanum",
+    color: "#222222",
+    marginRight: 8,
+  },
+  recordPlaceholderText: {
+    color: "#6B6B6B",
+  },
+  recordAmountBox: {
+    height: 40,
+    borderWidth: 1.2,
+    borderColor: "#2F6B57",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  recordAmountLabel: {
+    fontSize: 13,
+    fontFamily: "Nanum",
+    color: "#4B4B4B",
+  },
+  recordAmountControl: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  recordAmountIconButton: {
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recordAmountValue: {
+    marginHorizontal: 8,
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#222222",
+  },
+  recordSheetButtonRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 14,
+    marginTop: 4,
+  },
+  recordCancelButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "#C9C9C9",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  recordCancelButtonText: {
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#222222",
+  },
+  recordSaveButton: {
+    flex: 1,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: "#215F3E",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  recordSaveButtonText: {
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#FFFFFF",
   },
 });
