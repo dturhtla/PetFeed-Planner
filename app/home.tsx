@@ -24,6 +24,8 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      console.log("HOME SCREEN FOCUS");
+
       const onBackPress = () => {
         const now = Date.now();
 

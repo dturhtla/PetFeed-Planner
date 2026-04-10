@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { router, useLocalSearchParams } from "expo-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 type GenderType = "남" | "여" | "중성화" | "";
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
+type ProfileEntryMode = "signup" | "add";
 
 type LoggedInUser = {
   id: string;
@@ -46,6 +47,8 @@ const DISEASE_OPTIONS = [
 export default function DiseaseCheckScreen() {
   const params = useLocalSearchParams();
 
+  const [flowMode, setFlowMode] = useState<ProfileEntryMode>("signup");
+
   const [selectedDiseases, setSelectedDiseases] = useState<string[]>(
     (() => {
       if (typeof params?.selectedDiseases === "string") {
@@ -58,6 +61,36 @@ export default function DiseaseCheckScreen() {
       return [];
     })(),
   );
+
+  useEffect(() => {
+    const loadFlowMode = async () => {
+      try {
+        const savedUser = await AsyncStorage.getItem("loggedInUser");
+        const parsedUser: LoggedInUser | null = savedUser
+          ? JSON.parse(savedUser)
+          : null;
+
+        if (!parsedUser?.email) return;
+
+        const email = parsedUser.email;
+        const flowModeKey = `petProfileFlowMode_${email}`;
+        const savedFlowMode = await AsyncStorage.getItem(flowModeKey);
+
+        const resolvedMode: ProfileEntryMode =
+          params?.mode === "add"
+            ? "add"
+            : savedFlowMode === "add"
+              ? "add"
+              : "signup";
+
+        setFlowMode(resolvedMode);
+      } catch (error) {
+        console.log(error);
+      }
+    };
+
+    loadFlowMode();
+  }, [params?.mode]);
 
   const toggleDisease = (item: string) => {
     if (item === "없음") {
@@ -103,6 +136,7 @@ export default function DiseaseCheckScreen() {
       const profileKey = `petProfile_${email}`;
       const profilesKey = `petProfiles_${email}`;
       const completedKey = `profileCompleted_${email}`;
+      const flowModeKey = `petProfileFlowMode_${email}`;
 
       const savedProfile = await AsyncStorage.getItem(profileKey);
       const savedDraft = await AsyncStorage.getItem(draftKey);
@@ -124,7 +158,7 @@ export default function DiseaseCheckScreen() {
         !baseProfile.bcs
       ) {
         Alert.alert("알림", "프로필 정보가 완전하지 않습니다.");
-        router.replace("/profile-complete" as any);
+        router.replace("/profile" as any);
         return;
       }
 
@@ -133,8 +167,6 @@ export default function DiseaseCheckScreen() {
         diseases: selectedDiseases,
       };
 
-      // 프로필 수정 화면에서 질병 수정으로 들어온 경우
-      // draft만 갱신하고 profile 수정 화면으로 복귀
       if (params?.from === "profile") {
         await AsyncStorage.setItem(draftKey, JSON.stringify(finalProfile));
 
@@ -150,7 +182,6 @@ export default function DiseaseCheckScreen() {
         return;
       }
 
-      // 새 프로필 추가 흐름인 경우
       const savedProfiles = await AsyncStorage.getItem(profilesKey);
       const parsedProfiles: ProfileData[] = savedProfiles
         ? JSON.parse(savedProfiles)
@@ -163,7 +194,15 @@ export default function DiseaseCheckScreen() {
       await AsyncStorage.setItem(profilesKey, JSON.stringify(updatedProfiles));
       await AsyncStorage.setItem(completedKey, "true");
 
-      router.replace("/profile-complete" as any);
+      console.log("Disease flowMode:", flowMode);
+
+      if (flowMode === "signup") {
+        await AsyncStorage.removeItem(flowModeKey);
+        router.replace("/profile-complete" as any);
+      } else {
+        await AsyncStorage.removeItem(flowModeKey);
+        router.replace("/profile" as any);
+      }
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "질병 정보 저장 중 오류가 발생했습니다.");

@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -13,6 +13,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
 type GenderType = "남" | "여" | "중성화" | "";
+type ProfileEntryMode = "signup" | "add";
 
 type LoggedInUser = {
   id: string;
@@ -80,9 +81,14 @@ export default function BcsCheckScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
+  const initialParamMode = useMemo<ProfileEntryMode>(() => {
+    return params?.mode === "add" ? "add" : "signup";
+  }, [params?.mode]);
+
   const [petType, setPetType] = useState<PetType>("");
   const [selectedBcs, setSelectedBcs] = useState<BcsLabel | "">("");
   const [userEmail, setUserEmail] = useState("");
+  const [flowMode, setFlowMode] = useState<ProfileEntryMode>(initialParamMode);
 
   useEffect(() => {
     const loadData = async () => {
@@ -104,6 +110,9 @@ export default function BcsCheckScreen() {
         const savedDraft = await AsyncStorage.getItem(
           `petProfileDraft_${email}`,
         );
+        const savedFlowMode = await AsyncStorage.getItem(
+          `petProfileFlowMode_${email}`,
+        );
 
         const parsedProfile: ProfileDraftData = savedProfile
           ? JSON.parse(savedProfile)
@@ -117,7 +126,15 @@ export default function BcsCheckScreen() {
             ? (params.petType as PetType)
             : parsedDraft.petType || parsedProfile.petType || "";
 
+        const resolvedMode: ProfileEntryMode =
+          params?.mode === "add"
+            ? "add"
+            : savedFlowMode === "add"
+              ? "add"
+              : "signup";
+
         setPetType(finalPetType);
+        setFlowMode(resolvedMode);
 
         if (params?.selectedBcs && typeof params.selectedBcs === "string") {
           setSelectedBcs(params.selectedBcs as BcsLabel);
@@ -131,7 +148,7 @@ export default function BcsCheckScreen() {
     };
 
     loadData();
-  }, [params?.petType, params?.selectedBcs, router]);
+  }, [params?.petType, params?.selectedBcs, params?.mode, router]);
 
   const list = petType === "고양이" ? catBcsList : dogBcsList;
   const title =
@@ -152,6 +169,7 @@ export default function BcsCheckScreen() {
 
       const draftKey = `petProfileDraft_${userEmail}`;
       const profileKey = `petProfile_${userEmail}`;
+      const flowModeKey = `petProfileFlowMode_${userEmail}`;
 
       const savedDraft = await AsyncStorage.getItem(draftKey);
       const parsedDraft: ProfileDraftData = savedDraft
@@ -164,7 +182,6 @@ export default function BcsCheckScreen() {
         bcs: selectedBcs,
       };
 
-      // 프로필 수정 화면에서 BCS 수정으로 들어온 경우
       if (params?.from === "profile") {
         await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
 
@@ -180,7 +197,6 @@ export default function BcsCheckScreen() {
         return;
       }
 
-      // 새 프로필 추가 흐름인 경우
       if (
         !updatedProfile.name ||
         !updatedProfile.age ||
@@ -196,8 +212,16 @@ export default function BcsCheckScreen() {
 
       await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
       await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
+      await AsyncStorage.setItem(flowModeKey, flowMode);
 
-      router.push("/disease-check" as any);
+      console.log("BCS flowMode:", flowMode);
+
+      router.push({
+        pathname: "/disease-check",
+        params: {
+          mode: flowMode,
+        },
+      } as any);
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "BCS 저장 중 오류가 발생했습니다.");

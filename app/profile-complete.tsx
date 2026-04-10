@@ -78,11 +78,13 @@ export default function ProfileCompleteScreen() {
       await AsyncStorage.removeItem(`petProfile_${email}`);
       await AsyncStorage.removeItem(`petProfileDraft_${email}`);
       await AsyncStorage.removeItem(`profileCompleted_${email}`);
+      await AsyncStorage.setItem(`petProfileFlowMode_${email}`, "signup");
 
       router.push({
         pathname: "/profile",
         params: {
           forceInput: "true",
+          entryMode: "signup",
         },
       } as any);
     } catch (error) {
@@ -90,8 +92,34 @@ export default function ProfileCompleteScreen() {
     }
   };
 
-  const handleDone = () => {
-    router.replace("/home" as any);
+  const handleSaveProfile = async () => {
+    try {
+      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const parsedUser: LoggedInUser | null = savedUser
+        ? JSON.parse(savedUser)
+        : null;
+
+      if (!parsedUser?.email) {
+        console.log("profile-complete: email 없음");
+        router.replace("/" as any);
+        return;
+      }
+
+      const email = parsedUser.email;
+
+      await AsyncStorage.setItem(`profileCompleted_${email}`, "true");
+      await AsyncStorage.removeItem(`petProfileFlowMode_${email}`);
+
+      const completedValue = await AsyncStorage.getItem(
+        `profileCompleted_${email}`,
+      );
+      console.log("profile-complete completedValue:", completedValue);
+
+      router.dismissAll();
+      router.replace("/home" as any);
+    } catch (error) {
+      console.log("profile-complete handleSaveProfile error:", error);
+    }
   };
 
   const renderProfileIcon = (petType?: string) => {
@@ -134,8 +162,8 @@ export default function ProfileCompleteScreen() {
           <Text style={styles.addButtonText}>⊕ 프로필 추가하기</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
-          <Text style={styles.doneButtonText}>완료</Text>
+        <TouchableOpacity style={styles.doneButton} onPress={handleSaveProfile}>
+          <Text style={styles.doneButtonText}>프로필 저장</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
