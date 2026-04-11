@@ -77,19 +77,6 @@ const FEEDING_TYPE_OPTIONS = [
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
-const DEFAULT_FOOD_LIBRARY: FoodItem[] = [
-  { id: "1", name: "로얄캐닌 키튼", subLabel: "육묘용 50g", gramLabel: "50g" },
-  {
-    id: "2",
-    name: "힐스 사이언스 다이어트",
-    subLabel: "40g",
-    gramLabel: "40g",
-  },
-  { id: "3", name: "캐니노 프로플랜", subLabel: "45g", gramLabel: "45g" },
-  { id: "4", name: "네추럴발란스", subLabel: "35g", gramLabel: "35g" },
-  { id: "5", name: "오리젠 키튼", subLabel: "30g", gramLabel: "30g" },
-];
-
 const ITEM_HEIGHT = 34;
 const WHEEL_VISIBLE_ROWS = 3;
 const LOOP_REPEAT = 7;
@@ -104,8 +91,21 @@ const KOR_TO_WEEKDAY: Record<string, number> = {
   토: 7,
 };
 
+const EMPTY_FOOD: FoodItem = {
+  id: "temp",
+  name: "",
+  subLabel: "",
+  gramLabel: "",
+};
+
+const DEFAULT_FOOD_LIBRARY: FoodItem[] = [];
+
 function getAlarmsKey(email: string, petId: string) {
   return `feeding_alarms_${email}_${petId}`;
+}
+
+function getFoodsKey(email: string) {
+  return `savedFoods_${email}`;
 }
 
 function to24Hour(period: "오전" | "오후", hour: string) {
@@ -332,11 +332,17 @@ export default function FeedingAlarmScreen() {
 
   const [userEmail, setUserEmail] = useState("");
 
-  const [foodLibrary, setFoodLibrary] =
-    useState<FoodItem[]>(DEFAULT_FOOD_LIBRARY);
-
   const [alarms, setAlarms] = useState<AlarmItem[]>([]);
   const [isFormVisible, setIsFormVisible] = useState(false);
+
+  const sortedAlarms = useMemo(() => {
+    return [...alarms].sort((a, b) => {
+      const aTime = to24Hour(a.period, a.hour) * 60 + Number(a.minute);
+      const bTime = to24Hour(b.period, b.hour) * 60 + Number(b.minute);
+      return aTime - bTime;
+    });
+  }, [alarms]);
+
   const [editingAlarmId, setEditingAlarmId] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -349,12 +355,13 @@ export default function FeedingAlarmScreen() {
   const [selectedFeedingType, setSelectedFeedingType] = useState<
     "아침" | "점심" | "저녁"
   >("저녁");
-  const [selectedFood, setSelectedFood] = useState<FoodItem>(
-    DEFAULT_FOOD_LIBRARY[0],
-  );
-  const [tempSelectedFood, setTempSelectedFood] = useState<FoodItem>(
-    DEFAULT_FOOD_LIBRARY[0],
-  );
+  const [selectedFood, setSelectedFood] = useState<FoodItem>(EMPTY_FOOD);
+
+  const [foodLibrary, setFoodLibrary] = useState<FoodItem[]>([]);
+
+  const [tempSelectedFood, setTempSelectedFood] =
+    useState<FoodItem>(EMPTY_FOOD);
+
   const [amount, setAmount] = useState(50);
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [isFoodSheetVisible, setIsFoodSheetVisible] = useState(false);
@@ -385,8 +392,6 @@ export default function FeedingAlarmScreen() {
   useEffect(() => {
     const loadUserAndAlarms = async () => {
       try {
-        setIsLoaded(false);
-
         const savedUser = await AsyncStorage.getItem("loggedInUser");
         const parsedUser: LoggedInUser | null = savedUser
           ? JSON.parse(savedUser)
@@ -395,17 +400,21 @@ export default function FeedingAlarmScreen() {
         if (!parsedUser?.email || !petId || typeof petId !== "string") {
           setUserEmail("");
           setAlarms([]);
+          setFoodLibrary(DEFAULT_FOOD_LIBRARY);
           return;
         }
 
         const email = parsedUser.email;
         setUserEmail(email);
 
-        const alarmsKey = getAlarmsKey(email, petId);
-        const saved = await AsyncStorage.getItem(alarmsKey);
+        const alarmsKey = getAlarmsKey(email, petId as string);
+        const foodKey = getFoodsKey(email);
 
-        if (saved) {
-          const parsed = JSON.parse(saved);
+        const savedAlarms = await AsyncStorage.getItem(alarmsKey);
+        const savedFoods = await AsyncStorage.getItem(foodKey);
+
+        if (savedAlarms) {
+          const parsed = JSON.parse(savedAlarms);
           if (Array.isArray(parsed)) {
             setAlarms(parsed);
           } else {
@@ -414,6 +423,21 @@ export default function FeedingAlarmScreen() {
         } else {
           setAlarms([]);
         }
+
+        let loadedFoods: FoodItem[] = DEFAULT_FOOD_LIBRARY;
+
+        if (savedFoods) {
+          const parsedFoods = JSON.parse(savedFoods);
+          if (Array.isArray(parsedFoods) && parsedFoods.length > 0) {
+            loadedFoods = parsedFoods;
+          }
+        }
+
+        setFoodLibrary(loadedFoods);
+
+        const firstFood = loadedFoods[0] || EMPTY_FOOD;
+        setSelectedFood(firstFood);
+        setTempSelectedFood(firstFood);
       } catch (error) {
         console.log(error);
       } finally {
@@ -458,7 +482,7 @@ export default function FeedingAlarmScreen() {
 
     const saveAndSync = async () => {
       try {
-        const alarmsKey = getAlarmsKey(userEmail, petId);
+        const alarmsKey = getAlarmsKey(userEmail, petId as string);
         await AsyncStorage.setItem(alarmsKey, JSON.stringify(alarms));
         await syncFeedingAlarmNotifications(alarms);
       } catch (error) {
@@ -497,14 +521,12 @@ export default function FeedingAlarmScreen() {
   ]);
 
   const resetForm = () => {
-    const firstFood = foodLibrary[0] || DEFAULT_FOOD_LIBRARY[0];
-
     setSelectedPeriod("오후");
     setSelectedHour("05");
     setSelectedMinute("15");
     setSelectedFeedingType("저녁");
-    setSelectedFood(firstFood);
-    setTempSelectedFood(firstFood);
+    setSelectedFood(EMPTY_FOOD);
+    setTempSelectedFood(EMPTY_FOOD);
     setAmount(50);
     setSelectedDays([]);
     setEditingAlarmId(null);
@@ -640,7 +662,9 @@ export default function FeedingAlarmScreen() {
     setMinuteInput("");
   };
 
-  const handleAddNewFood = () => {
+  const handleAddNewFood = async () => {
+    if (!userEmail) return;
+
     const trimmedName = newFoodName.trim();
     const trimmedGram = newFoodGram.trim();
 
@@ -657,12 +681,49 @@ export default function FeedingAlarmScreen() {
       isCustom: true,
     };
 
-    setFoodLibrary((prev) => [newItem, ...prev]);
-    setTempSelectedFood(newItem);
-    setSelectedFood(newItem);
-    setIsAddFoodFormVisible(false);
-    setNewFoodName("");
-    setNewFoodGram("");
+    try {
+      const updatedFoods = [newItem, ...foodLibrary];
+
+      setFoodLibrary(updatedFoods);
+      setTempSelectedFood(newItem);
+      setSelectedFood(newItem);
+
+      await AsyncStorage.setItem(
+        getFoodsKey(userEmail),
+        JSON.stringify(updatedFoods),
+      );
+
+      setIsAddFoodFormVisible(false);
+      setNewFoodName("");
+      setNewFoodGram("");
+    } catch (error) {
+      console.log("handleAddNewFood error: ", error);
+    }
+  };
+
+  const handleDeleteFood = async (foodId: string) => {
+    if (!userEmail) return;
+
+    try {
+      const updatedFoods = foodLibrary.filter((item) => item.id !== foodId);
+
+      setFoodLibrary(updatedFoods);
+
+      if (selectedFood?.id === foodId) {
+        setSelectedFood(EMPTY_FOOD);
+      }
+
+      if (tempSelectedFood?.id === foodId) {
+        setTempSelectedFood(EMPTY_FOOD);
+      }
+
+      await AsyncStorage.setItem(
+        getFoodsKey(userEmail),
+        JSON.stringify(updatedFoods),
+      );
+    } catch (error) {
+      console.log("handleDeleteFood error: ", error);
+    }
   };
 
   const handleSaveAlarm = () => {
@@ -677,7 +738,7 @@ export default function FeedingAlarmScreen() {
     }
 
     if (!selectedFood?.name) {
-      Alert.alert("알림", "사료를 선택해주세요.");
+      Alert.alert("알림", "사료를 입력해주세요.");
       return;
     }
 
@@ -732,9 +793,7 @@ export default function FeedingAlarmScreen() {
     setSelectedMinute(alarm.minute);
     setSelectedFeedingType(alarm.feedingType);
 
-    const foundFood = foodLibrary.find(
-      (item) => item.name === alarm.foodName,
-    ) || {
+    const foundFood: FoodItem = {
       id: `temp-${alarm.id}`,
       name: alarm.foodName,
       subLabel: alarm.foodSubLabel,
@@ -799,7 +858,7 @@ export default function FeedingAlarmScreen() {
       ]}
       showsVerticalScrollIndicator={false}
     >
-      {alarms.map((alarm) => {
+      {sortedAlarms.map((alarm) => {
         const isSelected = selectedAlarmIds.includes(alarm.id);
 
         return (
@@ -1034,7 +1093,9 @@ export default function FeedingAlarmScreen() {
             </View>
 
             <View>
-              <Text style={styles.foodName}>{selectedFood.name}</Text>
+              <Text style={styles.foodName}>
+                {selectedFood.name || "사료를 입력해주세요"}
+              </Text>
               <Text style={styles.foodSub}>{selectedFood.subLabel}</Text>
             </View>
           </View>
@@ -1198,48 +1259,44 @@ export default function FeedingAlarmScreen() {
               nestedScrollEnabled
               showsVerticalScrollIndicator={false}
             >
-              {foodLibrary.map((item) => {
-                const isSelected = tempSelectedFood.id === item.id;
+              {foodLibrary.length === 0 ? (
+                <View style={styles.emptyFoodWrap}>
+                  <Text style={styles.emptyFoodText}>등록된 사료가 없어요</Text>
+                </View>
+              ) : (
+                foodLibrary.map((food) => {
+                  const isSelected = tempSelectedFood.id === food.id;
 
-                return (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[
-                      styles.foodRow,
-                      isSelected && styles.foodRowSelected,
-                    ]}
-                    activeOpacity={0.85}
-                    onPress={() => setTempSelectedFood(item)}
-                  >
-                    <View style={styles.foodRowLeft}>
-                      <View
-                        style={[
-                          styles.foodRadio,
-                          isSelected && styles.foodRadioSelected,
-                        ]}
-                      />
-                      <View>
-                        <Text
-                          style={[
-                            styles.foodRowName,
-                            isSelected && styles.foodRowNameSelected,
-                          ]}
-                        >
-                          {item.name}
-                        </Text>
-                        <Text style={styles.foodRowSub}>{item.subLabel}</Text>
+                  return (
+                    <TouchableOpacity
+                      key={food.id}
+                      style={[
+                        styles.foodItem,
+                        isSelected && styles.foodItemSelected,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setTempSelectedFood(food)}
+                    >
+                      <View style={styles.foodItemLeft}>
+                        <Text style={styles.foodName}>{food.name}</Text>
+                        <Text style={styles.foodSub}>{food.subLabel}</Text>
                       </View>
-                    </View>
 
-                    <View style={styles.foodRowRight}>
-                      <Text style={styles.foodGram}>{item.gramLabel}</Text>
-                      {isSelected ? (
-                        <Ionicons name="checkmark" size={18} color="#57A88C" />
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => handleDeleteFood(food.id)}
+                        style={styles.foodDeleteButton}
+                      >
+                        <Ionicons
+                          name="trash-outline"
+                          size={18}
+                          color="#9A9A9A"
+                        />
+                      </TouchableOpacity>
+                    </TouchableOpacity>
+                  );
+                })
+              )}
 
               {!isAddFoodFormVisible ? (
                 <TouchableOpacity
@@ -1751,63 +1808,18 @@ const styles = StyleSheet.create({
   foodListContent: {
     paddingBottom: 12,
   },
-  foodRow: {
-    minHeight: 58,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: "row",
+  emptyFoodWrap: {
+    minHeight: 140,
+    justifyContent: "center",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
-    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 16,
   },
-  foodRowSelected: {
-    backgroundColor: "#EEF7F3",
-    borderWidth: 1,
-    borderColor: "#9CC8B6",
-  },
-  foodRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    flex: 1,
-  },
-  foodRadio: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: "#D2D7D5",
-    marginRight: 10,
-  },
-  foodRadioSelected: {
-    backgroundColor: "#3D8B70",
-  },
-  foodRowName: {
-    fontSize: 14,
-    fontFamily: "NanumB",
-    color: "#333333",
-  },
-  foodRowNameSelected: {
-    color: "#2F6B57",
-  },
-  foodRowSub: {
-    marginTop: 3,
-    fontSize: 11,
+  emptyFoodText: {
+    fontSize: 15,
     fontFamily: "Nanum",
-    color: "#9CA4A0",
+    color: "#8A8A8A",
+    textAlign: "center",
   },
-  foodRowRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 10,
-  },
-  foodGram: {
-    fontSize: 12,
-    fontFamily: "Nanum",
-    color: "#A3AAA7",
-    marginRight: 8,
-  },
-
   addNewFoodButton: {
     height: 44,
     borderRadius: 10,
@@ -1915,5 +1927,26 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontFamily: "NanumB",
     color: "#333333",
+  },
+
+  foodItem: {
+    padding: 12,
+    borderRadius: 10,
+    backgroundColor: "#F5F5F5",
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  foodItemSelected: {
+    backgroundColor: "#DDEAE5",
+  },
+  foodItemLeft: {
+    flex: 1,
+  },
+
+  foodDeleteButton: {
+    marginLeft: 8,
+    padding: 2,
   },
 });
