@@ -3,7 +3,10 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
+  Alert,
   BackHandler,
+  FlatList,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +20,7 @@ type GenderType = "남" | "여" | "중성화" | "";
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
 type PickerType = "year" | "month" | null;
+type ProfileEntryMode = "signup" | "add";
 
 type LoggedInUser = {
   id: string;
@@ -31,6 +35,7 @@ type ProfileData = {
   gender: GenderType;
   petType: PetType;
   bcs: BcsLabel;
+  diseases?: string[];
 };
 
 type FieldErrors = {
@@ -40,6 +45,7 @@ type FieldErrors = {
   gender?: string;
   petType?: string;
   bcs?: string;
+  diseases?: string;
 };
 
 const FIRST_BOX_HEIGHT = 64;
@@ -56,6 +62,12 @@ export default function ProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
+  const forceInputMode = params?.forceInput === "true";
+
+  const requestedEntryMode = useMemo<ProfileEntryMode>(() => {
+    return params?.entryMode === "add" ? "add" : "signup";
+  }, [params?.entryMode]);
+
   const returnedSelectedBcs = useMemo(() => {
     return typeof params?.selectedBcs === "string"
       ? (params.selectedBcs as BcsLabel)
@@ -66,10 +78,36 @@ export default function ProfileScreen() {
     return params?.fromBcsEdit === "true";
   }, [params?.fromBcsEdit]);
 
-  const [isEditMode, setIsEditMode] = useState(false);
+  const returnedSelectedDiseases = useMemo(() => {
+    if (typeof params?.selectedDiseases !== "string") return [];
+    try {
+      return JSON.parse(params.selectedDiseases) as string[];
+    } catch {
+      return [];
+    }
+  }, [params?.selectedDiseases]);
+
+  const returnedFromDiseaseEdit = useMemo(() => {
+    return params?.fromDiseaseEdit === "true";
+  }, [params?.fromDiseaseEdit]);
+
+  const returnedEditIndex = useMemo(() => {
+    return typeof params?.editIndex === "string"
+      ? Number(params.editIndex)
+      : null;
+  }, [params?.editIndex]);
+
   const [isLoaded, setIsLoaded] = useState(false);
   const [userEmail, setUserEmail] = useState("");
-  const [hasCompletedProfile, setHasCompletedProfile] = useState(false);
+  const [profileEntryMode, setProfileEntryMode] =
+    useState<ProfileEntryMode>("signup");
+
+  const [profiles, setProfiles] = useState<ProfileData[]>([]);
+  const [isFirstInputMode, setIsFirstInputMode] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedProfileIndex, setSelectedProfileIndex] = useState<
+    number | null
+  >(null);
 
   const [name, setName] = useState("");
   const [ageYears, setAgeYears] = useState("");
@@ -78,13 +116,16 @@ export default function ProfileScreen() {
   const [gender, setGender] = useState<GenderType>("");
   const [petType, setPetType] = useState<PetType>("");
   const [bcs, setBcs] = useState<BcsLabel>("");
+  const [diseases, setDiseases] = useState<string[]>([]);
 
   const [errors, setErrors] = useState<FieldErrors>({});
   const [openPicker, setOpenPicker] = useState<PickerType>(null);
 
   const getDraftKey = (email: string) => `petProfileDraft_${email}`;
   const getProfileKey = (email: string) => `petProfile_${email}`;
+  const getProfilesKey = (email: string) => `petProfiles_${email}`;
   const getCompletedKey = (email: string) => `profileCompleted_${email}`;
+  const getFlowModeKey = (email: string) => `petProfileFlowMode_${email}`;
 
   const normalizeName = (value: string) => value.trim();
   const isValidName = (value: string) => /^[a-zA-Z가-힣\s]+$/.test(value);
@@ -132,9 +173,7 @@ export default function ProfileScreen() {
     const hasMonth = ageMonths !== "-";
 
     if (!hasYear && !hasMonth) return "";
-
     if (ageYears === "0" && hasMonth) return `${ageMonths}개월`;
-
     if (hasYear && hasMonth) return `${ageYears}년 ${ageMonths}개월`;
     if (hasYear) return `${ageYears}년`;
 
@@ -155,19 +194,34 @@ export default function ProfileScreen() {
     setAgeMonths(monthMatch ? monthMatch[1] : "-");
   };
 
-  const getAgeDisplay = () => {
-    const hasYear = ageYears !== "";
-    const hasMonth = ageMonths !== "-";
+  const applyProfileData = useCallback((data?: Partial<ProfileData>) => {
+    setName(data?.name || "");
+    parseAgeString(data?.age || "");
+    setWeight(data?.weight || "");
+    setGender((data?.gender as GenderType) || "");
+    setPetType((data?.petType as PetType) || "");
+    setBcs((data?.bcs as BcsLabel) || "");
+    setDiseases(data?.diseases || []);
+  }, []);
 
-    if (!hasYear && !hasMonth) return "-";
+  const clearFieldError = (field: keyof FieldErrors) => {
+    setErrors((prev) => ({
+      ...prev,
+      [field]: undefined,
+    }));
+  };
 
-    if (ageYears === "0" && hasMonth) {
-      return `${ageMonths}개월`;
-    }
-
-    if (hasYear && hasMonth) return `${ageYears}년 ${ageMonths}개월`;
-    if (hasYear) return `${ageYears}년`;
-    return `${ageMonths}개월`;
+  const resetForm = () => {
+    setName("");
+    setAgeYears("");
+    setAgeMonths("-");
+    setWeight("");
+    setGender("");
+    setPetType("");
+    setBcs("");
+    setDiseases([]);
+    setErrors({});
+    setOpenPicker(null);
   };
 
   const validateAge = () => {
@@ -183,22 +237,6 @@ export default function ProfileScreen() {
     }
 
     return undefined;
-  };
-
-  const applyProfileData = useCallback((data?: Partial<ProfileData>) => {
-    setName(data?.name || "");
-    parseAgeString(data?.age || "");
-    setWeight(data?.weight || "");
-    setGender((data?.gender as GenderType) || "");
-    setPetType((data?.petType as PetType) || "");
-    setBcs((data?.bcs as BcsLabel) || "");
-  }, []);
-
-  const clearFieldError = (field: keyof FieldErrors) => {
-    setErrors((prev) => ({
-      ...prev,
-      [field]: undefined,
-    }));
   };
 
   const validateBasicFields = () => {
@@ -283,8 +321,29 @@ export default function ProfileScreen() {
       newErrors.bcs = "BCS를 선택해주세요.";
     }
 
+    if (!diseases || diseases.length === 0) {
+      newErrors.diseases = "질병을 선택해주세요.";
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const saveDraft = async () => {
+    if (!userEmail) return;
+
+    const draft: ProfileData = {
+      name: normalizeName(filterNameInput(name)),
+      age: formatAgeForSave(),
+      weight: weight.trim(),
+      gender,
+      petType,
+      bcs,
+      diseases,
+    };
+
+    await AsyncStorage.setItem(getDraftKey(userEmail), JSON.stringify(draft));
+    await AsyncStorage.setItem(getFlowModeKey(userEmail), profileEntryMode);
   };
 
   const loadProfile = useCallback(async () => {
@@ -302,46 +361,83 @@ export default function ProfileScreen() {
 
       const savedProfile = await AsyncStorage.getItem(getProfileKey(email));
       const savedDraft = await AsyncStorage.getItem(getDraftKey(email));
-      const completed = await AsyncStorage.getItem(getCompletedKey(email));
-
-      const isCompleted = completed === "true";
-      setHasCompletedProfile(isCompleted);
+      const savedProfiles = await AsyncStorage.getItem(getProfilesKey(email));
+      const savedFlowMode = await AsyncStorage.getItem(getFlowModeKey(email));
 
       const parsedProfile = savedProfile ? JSON.parse(savedProfile) : null;
       const parsedDraft = savedDraft ? JSON.parse(savedDraft) : null;
+      const parsedProfiles: ProfileData[] = savedProfiles
+        ? JSON.parse(savedProfiles)
+        : parsedProfile
+          ? [parsedProfile]
+          : [];
 
-      if (returnedFromBcsEdit) {
-        if (parsedDraft) {
-          applyProfileData(parsedDraft);
-        } else if (parsedProfile) {
-          applyProfileData(parsedProfile);
-        } else {
-          applyProfileData();
-        }
+      const storedFlowMode: ProfileEntryMode =
+        savedFlowMode === "add" ? "add" : "signup";
+
+      setProfiles(parsedProfiles);
+
+      if (forceInputMode || parsedProfiles.length === 0) {
+        const nextMode: ProfileEntryMode =
+          forceInputMode && requestedEntryMode === "add" ? "add" : "signup";
+
+        await AsyncStorage.setItem(getFlowModeKey(email), nextMode);
+        setProfileEntryMode(nextMode);
+
+        resetForm();
+        setIsFirstInputMode(true);
+        setIsEditMode(false);
+        setSelectedProfileIndex(null);
+        return;
+      }
+
+      if (returnedFromBcsEdit || returnedFromDiseaseEdit) {
+        const editingProfile =
+          returnedEditIndex !== null && parsedProfiles[returnedEditIndex]
+            ? parsedProfiles[returnedEditIndex]
+            : parsedDraft || parsedProfile;
+
+        applyProfileData(editingProfile || undefined);
 
         if (returnedSelectedBcs) {
           setBcs(returnedSelectedBcs);
         }
 
-        setIsEditMode(true);
-      } else {
-        if (parsedProfile) {
-          applyProfileData(parsedProfile);
-        } else {
-          applyProfileData();
+        if (returnedFromDiseaseEdit) {
+          setDiseases(returnedSelectedDiseases);
         }
 
-        setIsEditMode(!isCompleted);
+        setProfileEntryMode(storedFlowMode);
+        setSelectedProfileIndex(returnedEditIndex);
+        setIsFirstInputMode(false);
+        setIsEditMode(true);
+        setErrors({});
+        return;
       }
 
+      setProfileEntryMode("signup");
+      setIsFirstInputMode(false);
+      setIsEditMode(false);
+      setSelectedProfileIndex(null);
       setErrors({});
     } catch (error) {
       console.log(error);
-      setIsEditMode(true);
+      setIsFirstInputMode(false);
+      setIsEditMode(false);
     } finally {
       setIsLoaded(true);
     }
-  }, [returnedFromBcsEdit, returnedSelectedBcs, router, applyProfileData]);
+  }, [
+    applyProfileData,
+    forceInputMode,
+    requestedEntryMode,
+    returnedEditIndex,
+    returnedFromBcsEdit,
+    returnedFromDiseaseEdit,
+    returnedSelectedBcs,
+    returnedSelectedDiseases,
+    router,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -352,6 +448,19 @@ export default function ProfileScreen() {
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
+        if (openPicker) {
+          setOpenPicker(null);
+          return true;
+        }
+
+        if (isEditMode || isFirstInputMode) {
+          setIsEditMode(false);
+          setIsFirstInputMode(false);
+          setSelectedProfileIndex(null);
+          setErrors({});
+          return true;
+        }
+
         router.replace("/home" as any);
         return true;
       };
@@ -362,28 +471,8 @@ export default function ProfileScreen() {
       );
 
       return () => subscription.remove();
-    }, [router]),
+    }, [router, isEditMode, isFirstInputMode, openPicker]),
   );
-
-  const saveDraft = async () => {
-    if (!userEmail) return;
-
-    const draft: ProfileData = {
-      name: normalizeName(filterNameInput(name)),
-      age: formatAgeForSave(),
-      weight: weight.trim(),
-      gender,
-      petType,
-      bcs,
-    };
-
-    await AsyncStorage.setItem(getDraftKey(userEmail), JSON.stringify(draft));
-  };
-
-  const clearDraft = async () => {
-    if (!userEmail) return;
-    await AsyncStorage.removeItem(getDraftKey(userEmail));
-  };
 
   const handleNextToBcs = async () => {
     if (!userEmail) {
@@ -402,6 +491,7 @@ export default function ProfileScreen() {
         pathname: "/bcs-check",
         params: {
           petType,
+          mode: profileEntryMode,
         },
       } as any);
     } catch (error) {
@@ -428,6 +518,49 @@ export default function ProfileScreen() {
           from: "profile",
           selectedBcs: bcs,
           petType,
+          editIndex:
+            selectedProfileIndex !== null ? String(selectedProfileIndex) : "",
+        },
+      } as any);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const handleDiseaseEditPress = async () => {
+    if (!userEmail) {
+      router.replace("/" as any);
+      return;
+    }
+
+    if (!validateBasicFields() || !bcs) {
+      setErrors((prev) => ({
+        ...prev,
+        bcs: !bcs ? "BCS를 선택해주세요." : prev.bcs,
+      }));
+      return;
+    }
+
+    try {
+      await saveDraft();
+
+      if (selectedProfileIndex !== null) {
+        router.push({
+          pathname: "/disease-check",
+          params: {
+            from: "profile",
+            selectedDiseases: JSON.stringify(diseases),
+            editIndex: String(selectedProfileIndex),
+          },
+        } as any);
+        return;
+      }
+
+      router.push({
+        pathname: "/disease-check",
+        params: {
+          mode: profileEntryMode,
+          selectedDiseases: JSON.stringify(diseases),
         },
       } as any);
     } catch (error) {
@@ -446,10 +579,6 @@ export default function ProfileScreen() {
         return;
       }
 
-      const alreadyCompleted = await AsyncStorage.getItem(
-        getCompletedKey(userEmail),
-      );
-
       const formattedWeight = formatWeightForSave(weight);
       const normalizedName = normalizeName(filterNameInput(name));
 
@@ -460,53 +589,125 @@ export default function ProfileScreen() {
         gender,
         petType,
         bcs,
+        diseases,
       };
 
+      const updatedProfiles = [...profiles];
+
+      if (selectedProfileIndex !== null) {
+        updatedProfiles[selectedProfileIndex] = finalProfile;
+      } else {
+        updatedProfiles.push(finalProfile);
+      }
+
+      await AsyncStorage.setItem(
+        getProfilesKey(userEmail),
+        JSON.stringify(updatedProfiles),
+      );
       await AsyncStorage.setItem(
         getProfileKey(userEmail),
         JSON.stringify(finalProfile),
       );
-
       await AsyncStorage.setItem(getCompletedKey(userEmail), "true");
-      await clearDraft();
+      await AsyncStorage.removeItem(getFlowModeKey(userEmail));
 
-      setHasCompletedProfile(true);
+      setProfiles(updatedProfiles);
       setIsEditMode(false);
+      setIsFirstInputMode(false);
+      setSelectedProfileIndex(null);
       setErrors({});
-      setName(normalizedName);
-      setWeight(formattedWeight);
-
-      if (alreadyCompleted !== "true") {
-        router.replace("/home" as any);
-        return;
-      }
-
-      router.replace("/home" as any);
-      setTimeout(() => {
-        router.push("/profile" as any);
-      }, 0);
     } catch (error) {
       console.log(error);
     }
   };
 
-  const handleStartEdit = async () => {
-    try {
-      setIsEditMode(true);
-      setErrors({});
-      await saveDraft();
-    } catch (error) {
-      console.log(error);
-      setIsEditMode(true);
-    }
+  const handleDeleteProfile = async () => {
+    if (!userEmail || selectedProfileIndex === null) return;
+
+    Alert.alert("삭제", "이 프로필을 삭제하시겠습니까?", [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제",
+        style: "destructive",
+        onPress: async () => {
+          const updatedProfiles = profiles.filter(
+            (_, index) => index !== selectedProfileIndex,
+          );
+
+          await AsyncStorage.setItem(
+            getProfilesKey(userEmail),
+            JSON.stringify(updatedProfiles),
+          );
+
+          if (updatedProfiles.length === 0) {
+            await AsyncStorage.removeItem(getProfileKey(userEmail));
+            await AsyncStorage.removeItem(getDraftKey(userEmail));
+            await AsyncStorage.removeItem(getCompletedKey(userEmail));
+            await AsyncStorage.removeItem(getFlowModeKey(userEmail));
+
+            setProfiles([]);
+            resetForm();
+            setIsFirstInputMode(true);
+            setIsEditMode(false);
+            setSelectedProfileIndex(null);
+            return;
+          }
+
+          await AsyncStorage.setItem(
+            getProfileKey(userEmail),
+            JSON.stringify(updatedProfiles[0]),
+          );
+
+          setProfiles(updatedProfiles);
+          setIsEditMode(false);
+          setSelectedProfileIndex(null);
+          setErrors({});
+        },
+      },
+    ]);
   };
 
-  const renderProfileIcon = () => {
-    if (petType === "고양이") {
+  const handleProfileCardPress = (profile: ProfileData, index: number) => {
+    applyProfileData(profile);
+    setSelectedProfileIndex(index);
+    setIsEditMode(true);
+    setIsFirstInputMode(false);
+    setErrors({});
+  };
+
+  const handleAddProfile = async () => {
+    if (!userEmail) return;
+
+    await AsyncStorage.removeItem(getProfileKey(userEmail));
+    await AsyncStorage.removeItem(getDraftKey(userEmail));
+    await AsyncStorage.setItem(getFlowModeKey(userEmail), "add");
+
+    resetForm();
+    setProfileEntryMode("add");
+    setIsFirstInputMode(true);
+    setIsEditMode(false);
+    setSelectedProfileIndex(null);
+  };
+
+  const renderProfileIcon = (type?: PetType) => {
+    if (type === "고양이") {
       return <Ionicons name="logo-octocat" size={52} color="#111" />;
     }
 
     return <Ionicons name="paw" size={52} color="#111" />;
+  };
+
+  const renderCardIcon = (type?: PetType) => {
+    if (type === "고양이") {
+      return <Ionicons name="logo-octocat" size={24} color="#111" />;
+    }
+
+    return <Ionicons name="paw" size={24} color="#111" />;
+  };
+
+  const getDiseaseText = (items?: string[]) => {
+    if (!items || items.length === 0) return "없음";
+    return items.join(", ");
   };
 
   const handleNameChange = (text: string) => {
@@ -568,47 +769,79 @@ export default function ProfileScreen() {
     clearFieldError("name");
   };
 
-  const renderPickerDropdown = (
-    type: "year" | "month",
-    isFirstScreen: boolean,
-  ) => {
-    const options = type === "year" ? YEAR_OPTIONS : MONTH_OPTIONS;
-    const isYear = type === "year";
+  const handleSelectPickerItem = useCallback(
+    (item: string) => {
+      if (openPicker === "year") {
+        setAgeYears(item);
+      } else if (openPicker === "month") {
+        setAgeMonths(item);
+      }
+      clearFieldError("age");
+      setOpenPicker(null);
+    },
+    [openPicker],
+  );
+
+  const renderPickerItem = useCallback(
+    ({ item }: { item: string }) => (
+      <TouchableOpacity
+        style={styles.modalItem}
+        onPress={() => handleSelectPickerItem(item)}
+      >
+        <Text style={styles.modalItemText}>
+          {openPicker === "year"
+            ? `${item}년`
+            : item === "-"
+              ? "-"
+              : `${item}개월`}
+        </Text>
+      </TouchableOpacity>
+    ),
+    [handleSelectPickerItem, openPicker],
+  );
+
+  const renderPickerModal = () => {
+    if (!openPicker) return null;
+
+    const options = openPicker === "year" ? YEAR_OPTIONS : MONTH_OPTIONS;
 
     return (
-      <View
-        style={[
-          styles.dropdownBox,
-          { top: (isFirstScreen ? FIRST_BOX_HEIGHT : BOX_HEIGHT) + 8 },
-          isYear ? styles.leftDropdown : styles.rightDropdown,
-        ]}
+      <Modal
+        transparent
+        visible={openPicker !== null}
+        animationType="fade"
+        onRequestClose={() => setOpenPicker(null)}
       >
-        <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={false}>
-          {options.map((option) => (
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalBackdrop}
+            activeOpacity={1}
+            onPress={() => setOpenPicker(null)}
+          />
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>
+              {openPicker === "year" ? "년 선택" : "개월 선택"}
+            </Text>
+
+            <FlatList
+              data={options}
+              keyExtractor={(item) => `${openPicker}-${item}`}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+              style={styles.modalList}
+              contentContainerStyle={styles.modalListContent}
+              renderItem={renderPickerItem}
+            />
+
             <TouchableOpacity
-              key={`${type}-${option}`}
-              style={styles.dropdownItem}
-              onPress={() => {
-                if (type === "year") {
-                  setAgeYears(option);
-                } else {
-                  setAgeMonths(option);
-                }
-                clearFieldError("age");
-                setOpenPicker(null);
-              }}
+              style={styles.modalCloseButton}
+              onPress={() => setOpenPicker(null)}
             >
-              <Text style={styles.dropdownItemText}>
-                {type === "year"
-                  ? `${option}년`
-                  : option === "-"
-                    ? "-"
-                    : `${option}개월`}
-              </Text>
+              <Text style={styles.modalCloseButtonText}>닫기</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+          </View>
+        </View>
+      </Modal>
     );
   };
 
@@ -629,9 +862,7 @@ export default function ProfileScreen() {
           <View style={rowStyle}>
             <TouchableOpacity
               style={[boxStyle, errors.age && styles.inputErrorBorder]}
-              onPress={() =>
-                setOpenPicker(openPicker === "year" ? null : "year")
-              }
+              onPress={() => setOpenPicker("year")}
             >
               <Text
                 style={[textStyle, ageYears === "" && styles.placeholderText]}
@@ -643,9 +874,16 @@ export default function ProfileScreen() {
 
             <TouchableOpacity
               style={[boxStyle, errors.age && styles.inputErrorBorder]}
-              onPress={() =>
-                setOpenPicker(openPicker === "month" ? null : "month")
-              }
+              onPress={() => {
+                if (!ageYears) {
+                  setErrors((prev) => ({
+                    ...prev,
+                    age: "개월을 선택하려면 년을 먼저 선택해주세요.",
+                  }));
+                  return;
+                }
+                setOpenPicker("month");
+              }}
             >
               <Text
                 style={[textStyle, ageMonths === "-" && styles.placeholderText]}
@@ -655,11 +893,8 @@ export default function ProfileScreen() {
               <Ionicons name="caret-down" size={20} color="#2F6B57" />
             </TouchableOpacity>
           </View>
-
-          {openPicker === "year" && renderPickerDropdown("year", isFirstScreen)}
-          {openPicker === "month" &&
-            renderPickerDropdown("month", isFirstScreen)}
         </View>
+
         {errors.age ? <Text style={styles.errorText}>{errors.age}</Text> : null}
       </>
     );
@@ -669,11 +904,10 @@ export default function ProfileScreen() {
     return <SafeAreaView style={styles.safe} />;
   }
 
-  const showInputFirstScreen = !hasCompletedProfile && isEditMode;
-
-  if (showInputFirstScreen) {
+  if (isFirstInputMode) {
     return (
       <SafeAreaView style={styles.safe}>
+        {renderPickerModal()}
         <ScrollView
           contentContainerStyle={styles.firstContainer}
           showsVerticalScrollIndicator={false}
@@ -817,233 +1051,266 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
+      {renderPickerModal()}
+
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.replace("/home" as any)}
+          onPress={() => {
+            if (isEditMode) {
+              setIsEditMode(false);
+              setSelectedProfileIndex(null);
+              setErrors({});
+              return;
+            }
+            router.replace("/home" as any);
+          }}
         >
           <Ionicons name="chevron-back" size={24} color="#2F6B57" />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>프로필</Text>
+        <Text style={styles.headerTitle}>
+          {isEditMode ? "프로필 수정" : "프로필"}
+        </Text>
 
-        <View style={{ width: 24 }} />
+        {isEditMode ? (
+          <TouchableOpacity
+            style={styles.deleteHeaderButton}
+            onPress={handleDeleteProfile}
+          >
+            <Text style={styles.deleteHeaderButtonText}>삭제</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 24 }} />
+        )}
       </View>
 
       <View style={styles.line} />
 
-      <ScrollView
-        contentContainerStyle={styles.container}
-        keyboardShouldPersistTaps="handled"
-      >
-        {!isEditMode ? (
-          <>
-            <TouchableOpacity onPress={handleStartEdit}>
-              <Text style={styles.editText}>정보 수정하기</Text>
+      {!isEditMode ? (
+        <ScrollView
+          contentContainerStyle={styles.listContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.listTitle}>내 반려동물</Text>
+
+          {profiles.map((item, index) => (
+            <TouchableOpacity
+              key={index}
+              style={styles.profileCard}
+              activeOpacity={0.85}
+              onPress={() => handleProfileCardPress(item, index)}
+            >
+              <View style={styles.profileCardAvatar}>
+                {renderCardIcon(item.petType)}
+              </View>
+
+              <View style={styles.profileCardTextWrap}>
+                <Text style={styles.profileCardName}>{item.name}</Text>
+                <Text style={styles.profileCardInfo}>
+                  {item.age || "-"} / {item.weight ? `${item.weight}kg` : "-"} /{" "}
+                  {item.gender || "-"} / {item.bcs || "-"} /{" "}
+                  {getDiseaseText(item.diseases)}
+                </Text>
+              </View>
             </TouchableOpacity>
+          ))}
 
-            <View style={styles.avatar}>{renderProfileIcon()}</View>
+          <TouchableOpacity
+            style={styles.addProfileButton}
+            onPress={handleAddProfile}
+          >
+            <Text style={styles.addProfileButtonText}>⊕ 프로필 추가하기</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      ) : (
+        <ScrollView
+          contentContainerStyle={styles.editContainer}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.editAvatar}>{renderProfileIcon(petType)}</View>
 
-            <View style={styles.infoList}>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  <Text style={styles.label}>이름: </Text>
-                  {name || "-"}
+          <TextInput
+            placeholder="이름"
+            placeholderTextColor="#777"
+            style={[styles.input, errors.name && styles.inputErrorBorder]}
+            value={name}
+            onChangeText={handleNameChange}
+            onBlur={sanitizeNameOnBlur}
+            onEndEditing={sanitizeNameOnBlur}
+          />
+          {errors.name ? (
+            <Text style={styles.errorText}>{errors.name}</Text>
+          ) : null}
+
+          <TextInput
+            placeholder="몸무게(kg)"
+            placeholderTextColor="#777"
+            style={[styles.input, errors.weight && styles.inputErrorBorder]}
+            value={weight}
+            onChangeText={(text) => {
+              const filtered = filterWeightInput(text);
+              setWeight(filtered);
+
+              if (text !== filtered) {
+                setErrors((prev) => ({
+                  ...prev,
+                  weight:
+                    "몸무게는 정수 3자리까지, 소수는 1자리까지 입력 가능합니다.",
+                }));
+                return;
+              }
+
+              clearFieldError("weight");
+            }}
+            keyboardType="decimal-pad"
+            maxLength={5}
+          />
+          {errors.weight ? (
+            <Text style={styles.errorText}>{errors.weight}</Text>
+          ) : null}
+
+          {renderAgeSelector(false)}
+
+          <Text style={styles.sectionLabel}>성별</Text>
+          <View style={styles.genderRow}>
+            {(["남", "여", "중성화"] as GenderType[]).map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={[
+                  styles.genderButton,
+                  gender === item && styles.selectedButton,
+                  errors.gender && styles.inputErrorBorder,
+                ]}
+                onPress={() => {
+                  setGender(item);
+                  clearFieldError("gender");
+                }}
+              >
+                <Text
+                  style={[
+                    styles.selectButtonText,
+                    gender === item && styles.selectedButtonText,
+                  ]}
+                >
+                  {item}
                 </Text>
-                <View style={styles.underline} />
-              </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {errors.gender ? (
+            <Text style={styles.errorText}>{errors.gender}</Text>
+          ) : null}
 
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  <Text style={styles.label}>몸무게: </Text>
-                  {weight ? `${weight}kg` : "-"}
-                </Text>
-                <View style={styles.underline} />
-              </View>
-
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  <Text style={styles.label}>나이: </Text>
-                  {getAgeDisplay()}
-                </Text>
-                <View style={styles.underline} />
-              </View>
-
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  <Text style={styles.label}>성별: </Text>
-                  {gender || "-"}
-                </Text>
-                <View style={styles.underline} />
-              </View>
-
-              <View style={styles.infoItem}>
-                <Text style={styles.infoValue}>
-                  <Text style={styles.label}>비만도: </Text>
-                  {bcs || "-"}
-                </Text>
-                <View style={styles.underline} />
-              </View>
-            </View>
-          </>
-        ) : (
-          <>
-            <View style={styles.editAvatar}>{renderProfileIcon()}</View>
-
-            <TextInput
-              placeholder="이름"
-              placeholderTextColor="#777"
-              style={[styles.input, errors.name && styles.inputErrorBorder]}
-              value={name}
-              onChangeText={handleNameChange}
-              onBlur={sanitizeNameOnBlur}
-              onEndEditing={sanitizeNameOnBlur}
-            />
-            {errors.name ? (
-              <Text style={styles.errorText}>{errors.name}</Text>
-            ) : null}
-
-            <TextInput
-              placeholder="몸무게(kg)"
-              placeholderTextColor="#777"
-              style={[styles.input, errors.weight && styles.inputErrorBorder]}
-              value={weight}
-              onChangeText={(text) => {
-                const filtered = filterWeightInput(text);
-                setWeight(filtered);
-
-                if (text !== filtered) {
-                  setErrors((prev) => ({
-                    ...prev,
-                    weight:
-                      "몸무게는 정수 3자리까지, 소수는 1자리까지 입력 가능합니다.",
-                  }));
-                  return;
-                }
-
-                clearFieldError("weight");
+          <Text style={styles.sectionLabel}>종</Text>
+          <View style={styles.row}>
+            <TouchableOpacity
+              style={[
+                styles.selectButton,
+                petType === "강아지" && styles.selectedButton,
+                errors.petType && styles.inputErrorBorder,
+              ]}
+              onPress={() => {
+                setPetType("강아지");
+                clearFieldError("petType");
               }}
-              keyboardType="decimal-pad"
-              maxLength={5}
-            />
-            {errors.weight ? (
-              <Text style={styles.errorText}>{errors.weight}</Text>
-            ) : null}
-
-            {renderAgeSelector(false)}
-
-            <Text style={styles.sectionLabel}>성별</Text>
-            <View style={styles.genderRow}>
-              {(["남", "여", "중성화"] as GenderType[]).map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  style={[
-                    styles.genderButton,
-                    gender === item && styles.selectedButton,
-                    errors.gender && styles.inputErrorBorder,
-                  ]}
-                  onPress={() => {
-                    setGender(item);
-                    clearFieldError("gender");
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.selectButtonText,
-                      gender === item && styles.selectedButtonText,
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            {errors.gender ? (
-              <Text style={styles.errorText}>{errors.gender}</Text>
-            ) : null}
-
-            <Text style={styles.sectionLabel}>종</Text>
-            <View style={styles.row}>
-              <TouchableOpacity
+            >
+              <Text
                 style={[
-                  styles.selectButton,
-                  petType === "강아지" && styles.selectedButton,
-                  errors.petType && styles.inputErrorBorder,
-                ]}
-                onPress={() => {
-                  setPetType("강아지");
-                  clearFieldError("petType");
-                }}
-              >
-                <Text
-                  style={[
-                    styles.selectButtonText,
-                    petType === "강아지" && styles.selectedButtonText,
-                  ]}
-                >
-                  강아지
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.selectButton,
-                  petType === "고양이" && styles.selectedButton,
-                  errors.petType && styles.inputErrorBorder,
-                ]}
-                onPress={() => {
-                  setPetType("고양이");
-                  clearFieldError("petType");
-                }}
-              >
-                <Text
-                  style={[
-                    styles.selectButtonText,
-                    petType === "고양이" && styles.selectedButtonText,
-                  ]}
-                >
-                  고양이
-                </Text>
-              </TouchableOpacity>
-            </View>
-            {errors.petType ? (
-              <Text style={styles.errorText}>{errors.petType}</Text>
-            ) : null}
-
-            <Text style={styles.sectionLabel}>BCS</Text>
-            <View style={styles.bcsRow}>
-              <View
-                style={[
-                  styles.bcsValueBox,
-                  errors.bcs && styles.inputErrorBorder,
+                  styles.selectButtonText,
+                  petType === "강아지" && styles.selectedButtonText,
                 ]}
               >
-                <Text style={styles.bcsValueText}>{bcs || "선택 안됨"}</Text>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.bcsEditButton,
-                  errors.bcs && styles.inputErrorBorder,
-                ]}
-                onPress={handleBcsEditPress}
-              >
-                <Text style={styles.bcsEditButtonText}>수정</Text>
-              </TouchableOpacity>
-            </View>
-            {errors.bcs ? (
-              <Text style={styles.errorText}>{errors.bcs}</Text>
-            ) : null}
+                강아지
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.singleSaveButton}
-              onPress={handleSave}
+              style={[
+                styles.selectButton,
+                petType === "고양이" && styles.selectedButton,
+                errors.petType && styles.inputErrorBorder,
+              ]}
+              onPress={() => {
+                setPetType("고양이");
+                clearFieldError("petType");
+              }}
             >
-              <Text style={styles.singleSaveButtonText}>저장</Text>
+              <Text
+                style={[
+                  styles.selectButtonText,
+                  petType === "고양이" && styles.selectedButtonText,
+                ]}
+              >
+                고양이
+              </Text>
             </TouchableOpacity>
-          </>
-        )}
-      </ScrollView>
+          </View>
+          {errors.petType ? (
+            <Text style={styles.errorText}>{errors.petType}</Text>
+          ) : null}
+
+          <Text style={styles.sectionLabel}>BCS</Text>
+          <View style={styles.bcsRow}>
+            <View
+              style={[
+                styles.bcsValueBox,
+                errors.bcs && styles.inputErrorBorder,
+              ]}
+            >
+              <Text style={styles.bcsValueText}>{bcs || "선택 안됨"}</Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.bcsEditButton,
+                errors.bcs && styles.inputErrorBorder,
+              ]}
+              onPress={handleBcsEditPress}
+            >
+              <Text style={styles.bcsEditButtonText}>수정</Text>
+            </TouchableOpacity>
+          </View>
+          {errors.bcs ? (
+            <Text style={styles.errorText}>{errors.bcs}</Text>
+          ) : null}
+
+          <Text style={styles.sectionLabel}>질병</Text>
+          <View style={styles.bcsRow}>
+            <View
+              style={[
+                styles.bcsValueBox,
+                errors.diseases && styles.inputErrorBorder,
+              ]}
+            >
+              <Text style={styles.bcsValueText}>
+                {diseases.length > 0 ? diseases.join(", ") : "선택 안됨"}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[
+                styles.bcsEditButton,
+                errors.diseases && styles.inputErrorBorder,
+              ]}
+              onPress={handleDiseaseEditPress}
+            >
+              <Text style={styles.bcsEditButtonText}>수정</Text>
+            </TouchableOpacity>
+          </View>
+          {errors.diseases ? (
+            <Text style={styles.errorText}>{errors.diseases}</Text>
+          ) : null}
+
+          <TouchableOpacity
+            style={styles.singleSaveButton}
+            onPress={handleSave}
+          >
+            <Text style={styles.singleSaveButtonText}>저장</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -1189,33 +1456,86 @@ const styles = StyleSheet.create({
     fontFamily: "Nanum",
     color: "#2F6B57",
   },
+  deleteHeaderButton: {
+    minWidth: 36,
+    alignItems: "flex-end",
+  },
+  deleteHeaderButtonText: {
+    fontSize: 14,
+    fontFamily: "NanumB",
+    color: "#C24848",
+  },
   line: {
     height: 1,
     backgroundColor: "#777",
     opacity: 0.5,
   },
-  container: {
+
+  listContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 40,
+  },
+  listTitle: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    marginBottom: 12,
+  },
+  profileCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EAF3EF",
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 12,
+  },
+  profileCardAvatar: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+    borderWidth: 1,
+    borderColor: "#D4E4DC",
+  },
+  profileCardTextWrap: {
+    flex: 1,
+  },
+  profileCardName: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#111111",
+    marginBottom: 4,
+  },
+  profileCardInfo: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#666666",
+    lineHeight: 18,
+  },
+  addProfileButton: {
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "#2F6B57",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginTop: 6,
+  },
+  addProfileButtonText: {
+    fontSize: 14,
+    fontFamily: "Nanum",
+    color: "#2F6B57",
+  },
+
+  editContainer: {
     paddingHorizontal: 24,
     paddingTop: 24,
     paddingBottom: 36,
     alignItems: "center",
-  },
-  editText: {
-    fontSize: 14,
-    fontFamily: "Nanum",
-    color: "#666",
-    marginBottom: 14,
-  },
-  avatar: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    borderWidth: 2,
-    borderColor: "#2F6B57",
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 22,
   },
   editAvatar: {
     width: 112,
@@ -1230,30 +1550,7 @@ const styles = StyleSheet.create({
     marginBottom: 18,
     alignSelf: "center",
   },
-  infoList: {
-    width: "100%",
-    alignItems: "center",
-  },
-  infoItem: {
-    width: "78%",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  infoValue: {
-    fontSize: 21,
-    fontFamily: "Nanum",
-    color: "#777",
-    marginBottom: 6,
-  },
-  label: {
-    fontFamily: "Nanum",
-    color: "#2F6B57",
-  },
-  underline: {
-    width: "100%",
-    height: 2,
-    backgroundColor: "#2F6B57",
-  },
+
   input: {
     width: "100%",
     height: BOX_HEIGHT,
@@ -1284,9 +1581,7 @@ const styles = StyleSheet.create({
   },
   ageSection: {
     width: "100%",
-    position: "relative",
     marginBottom: 6,
-    zIndex: 10,
   },
   ageRow: {
     width: "100%",
@@ -1299,7 +1594,7 @@ const styles = StyleSheet.create({
     height: BOX_HEIGHT,
     borderWidth: 1.5,
     borderColor: "#A9C3B7",
-    borderRadius: 16,
+    borderRadius: 18,
     backgroundColor: "#FFFFFF",
     paddingHorizontal: 16,
     flexDirection: "row",
@@ -1314,48 +1609,7 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: "#8A8A8A",
   },
-  dropdownBox: {
-    position: "absolute",
-    top: BOX_HEIGHT + 8,
-    width: "48%",
-    maxHeight: 220,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1.2,
-    borderColor: "#B6CEC4",
-    borderRadius: 14,
-    paddingVertical: 4,
-    elevation: 6,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
-  },
-  leftDropdown: {
-    left: 0,
-  },
-  rightDropdown: {
-    right: 0,
-  },
-  dropdownItem: {
-    height: 44,
-    justifyContent: "center",
-    paddingHorizontal: 14,
-  },
-  dropdownItemText: {
-    fontSize: 15,
-    fontFamily: "Nanum",
-    color: "#222",
-  },
-  selectButton: {
-    flex: 1,
-    height: BOX_HEIGHT,
-    borderWidth: 1.5,
-    borderColor: "#A9C3B7",
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-  },
+
   genderRow: {
     width: "100%",
     flexDirection: "row",
@@ -1377,6 +1631,16 @@ const styles = StyleSheet.create({
     backgroundColor: "#2F6B57",
     borderColor: "#2F6B57",
   },
+  selectButton: {
+    flex: 1,
+    height: BOX_HEIGHT,
+    borderWidth: 1.5,
+    borderColor: "#A9C3B7",
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   selectButtonText: {
     fontSize: 15,
     fontFamily: "Nanum",
@@ -1385,6 +1649,7 @@ const styles = StyleSheet.create({
   selectedButtonText: {
     color: "#FFFFFF",
   },
+
   bcsRow: {
     width: "100%",
     flexDirection: "row",
@@ -1394,13 +1659,14 @@ const styles = StyleSheet.create({
   },
   bcsValueBox: {
     flex: 1,
-    height: BOX_HEIGHT,
+    minHeight: BOX_HEIGHT,
     borderWidth: 1.5,
     borderColor: "#A9C3B7",
     borderRadius: 16,
     backgroundColor: "#FFFFFF",
     justifyContent: "center",
     paddingHorizontal: 16,
+    paddingVertical: 10,
   },
   bcsValueText: {
     fontSize: 17,
@@ -1422,6 +1688,7 @@ const styles = StyleSheet.create({
     fontFamily: "Nanum",
     color: "#FFFFFF",
   },
+
   singleSaveButton: {
     width: "100%",
     height: 50,
@@ -1437,6 +1704,71 @@ const styles = StyleSheet.create({
     fontSize: 19,
     fontFamily: "Nanum",
   },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.30)",
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 24,
+  },
+  modalBackdrop: {
+    position: "absolute",
+    width: "100%",
+    height: "100%",
+  },
+  modalCard: {
+    width: "88%",
+    maxWidth: 320,
+    height: "55%",
+    maxHeight: 500,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    paddingTop: 28,
+    paddingHorizontal: 22,
+    paddingBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    textAlign: "center",
+    marginBottom: 10,
+    letterSpacing: -0.4,
+  },
+  modalList: {
+    flexGrow: 0,
+    maxHeight: 360,
+  },
+  modalListContent: {
+    paddingBottom: 2,
+    paddingTop: 0,
+  },
+  modalItem: {
+    height: 48,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalItemText: {
+    fontSize: 16,
+    fontFamily: "Nanum",
+    color: "#222222",
+    letterSpacing: -0.3,
+  },
+  modalCloseButton: {
+    height: 50,
+    borderRadius: 14,
+    backgroundColor: "#2F6B57",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 10,
+  },
+  modalCloseButtonText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontFamily: "NanumB",
+  },
+
   errorText: {
     width: "100%",
     color: "#D64545",

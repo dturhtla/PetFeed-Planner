@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   ScrollView,
@@ -12,7 +12,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 type PetType = "강아지" | "고양이" | "";
 type BcsLabel = "심한 저체중" | "저체중" | "정상" | "과체중" | "비만" | "";
-type GenderType = "남" | "여" | "";
+type GenderType = "남" | "여" | "중성화" | "";
+type ProfileEntryMode = "signup" | "add";
 
 type LoggedInUser = {
   id: string;
@@ -27,6 +28,7 @@ type ProfileDraftData = {
   gender?: GenderType;
   petType?: PetType;
   bcs?: BcsLabel;
+  diseases?: string[];
 };
 
 const dogBcsList = [
@@ -79,9 +81,14 @@ export default function BcsCheckScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
+  const initialParamMode = useMemo<ProfileEntryMode>(() => {
+    return params?.mode === "add" ? "add" : "signup";
+  }, [params?.mode]);
+
   const [petType, setPetType] = useState<PetType>("");
   const [selectedBcs, setSelectedBcs] = useState<BcsLabel | "">("");
   const [userEmail, setUserEmail] = useState("");
+  const [flowMode, setFlowMode] = useState<ProfileEntryMode>(initialParamMode);
 
   useEffect(() => {
     const loadData = async () => {
@@ -103,6 +110,9 @@ export default function BcsCheckScreen() {
         const savedDraft = await AsyncStorage.getItem(
           `petProfileDraft_${email}`,
         );
+        const savedFlowMode = await AsyncStorage.getItem(
+          `petProfileFlowMode_${email}`,
+        );
 
         const parsedProfile: ProfileDraftData = savedProfile
           ? JSON.parse(savedProfile)
@@ -116,7 +126,15 @@ export default function BcsCheckScreen() {
             ? (params.petType as PetType)
             : parsedDraft.petType || parsedProfile.petType || "";
 
+        const resolvedMode: ProfileEntryMode =
+          params?.mode === "add"
+            ? "add"
+            : savedFlowMode === "add"
+              ? "add"
+              : "signup";
+
         setPetType(finalPetType);
+        setFlowMode(resolvedMode);
 
         if (params?.selectedBcs && typeof params.selectedBcs === "string") {
           setSelectedBcs(params.selectedBcs as BcsLabel);
@@ -130,13 +148,13 @@ export default function BcsCheckScreen() {
     };
 
     loadData();
-  }, [params?.petType, params?.selectedBcs, router]);
+  }, [params?.petType, params?.selectedBcs, params?.mode, router]);
 
   const list = petType === "고양이" ? catBcsList : dogBcsList;
   const title =
     petType === "고양이" ? "고양이 비만도 체크" : "강아지 비만도 체크";
 
-  const handleDone = async () => {
+  const handleNext = async () => {
     if (!selectedBcs) {
       Alert.alert("알림", "비만도를 하나 선택해주세요.");
       return;
@@ -151,7 +169,7 @@ export default function BcsCheckScreen() {
 
       const draftKey = `petProfileDraft_${userEmail}`;
       const profileKey = `petProfile_${userEmail}`;
-      const completedKey = `profileCompleted_${userEmail}`;
+      const flowModeKey = `petProfileFlowMode_${userEmail}`;
 
       const savedDraft = await AsyncStorage.getItem(draftKey);
       const parsedDraft: ProfileDraftData = savedDraft
@@ -164,7 +182,6 @@ export default function BcsCheckScreen() {
         bcs: selectedBcs,
       };
 
-      // 프로필 수정 화면에서 들어온 경우 → 프로필 화면으로 복귀
       if (params?.from === "profile") {
         await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
 
@@ -173,12 +190,13 @@ export default function BcsCheckScreen() {
           params: {
             selectedBcs,
             fromBcsEdit: "true",
+            editIndex:
+              typeof params?.editIndex === "string" ? params.editIndex : "",
           },
         } as any);
         return;
       }
 
-      // 처음 프로필 입력인 경우 → 정보 저장 후 메인화면 이동
       if (
         !updatedProfile.name ||
         !updatedProfile.age ||
@@ -194,9 +212,16 @@ export default function BcsCheckScreen() {
 
       await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
       await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
-      await AsyncStorage.setItem(completedKey, "true");
+      await AsyncStorage.setItem(flowModeKey, flowMode);
 
-      router.replace("/home" as any);
+      console.log("BCS flowMode:", flowMode);
+
+      router.push({
+        pathname: "/disease-check",
+        params: {
+          mode: flowMode,
+        },
+      } as any);
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "BCS 저장 중 오류가 발생했습니다.");
@@ -233,8 +258,8 @@ export default function BcsCheckScreen() {
           );
         })}
 
-        <TouchableOpacity style={styles.doneButton} onPress={handleDone}>
-          <Text style={styles.doneButtonText}>DONE</Text>
+        <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
+          <Text style={styles.nextButtonText}>NEXT</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -290,7 +315,7 @@ const styles = StyleSheet.create({
   selectedText: {
     color: "#FFFFFF",
   },
-  doneButton: {
+  nextButton: {
     height: 54,
     backgroundColor: "#1F5F43",
     borderRadius: 14,
@@ -298,7 +323,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 6,
   },
-  doneButtonText: {
+  nextButtonText: {
     color: "#FFF",
     fontSize: 22,
     fontFamily: "Nanum",

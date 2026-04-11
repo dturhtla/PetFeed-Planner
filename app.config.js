@@ -2,7 +2,7 @@ const path = require("path");
 const { loadProjectEnv } = require("@expo/env");
 
 // Load .env / .env.local into process.env before reading EXPO_PUBLIC_* (same as Metro)
-loadProjectEnv(path.resolve(__dirname), { silent: true });
+loadProjectEnv(path.resolve(process.cwd()), { silent: true });
 
 const appJson = require("./app.json");
 
