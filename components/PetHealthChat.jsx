@@ -16,6 +16,11 @@ import * as ImagePicker from "expo-image-picker";
 import * as FileSystem from "expo-file-system";
 import { Ionicons } from "@expo/vector-icons";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import {
+  ExpoSpeechRecognitionModule,
+  isSpeechRecognitionAvailable,
+  useSpeechRecognitionEvent,
+} from "../utils/speechRecognitionSafe";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import BrandRecommendationCard from "./BrandRecommendationCard";
 import {
@@ -94,7 +99,7 @@ function guessMimeType(uri) {
 async function imageToBase64(uri, existingBase64) {
   if (existingBase64) return existingBase64;
   const data = await FileSystem.readAsStringAsync(uri, {
-    encoding: FileSystem.EncodingType.Base64,
+    encoding: "base64",
   });
   return data;
 }
@@ -104,12 +109,25 @@ function PetHealthChat() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const listRef = useRef(null);
+  /** Text in the input when the user started voice input (prepended to transcript). */
+  const speechBaseRef = useRef("");
   const chatSessionRef = useRef(null);
   const modelRef = useRef(null);
   const lastReplyLocaleRef = useRef("ko");
 
   const apiKey = (process.env.EXPO_PUBLIC_GEMINI_API_KEY || "").trim();
+
+  useEffect(() => {
+    return () => {
+      try {
+        ExpoSpeechRecognitionModule.abort();
+      } catch {
+        /* not listening or native unavailable */
+      }
+    };
+  }, []);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -378,6 +396,86 @@ function PetHealthChat() {
     ]);
   };
 
+  useSpeechRecognitionEvent("start", () => {
+    setIsListening(true);
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    setIsListening(false);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    const t = event.results?.[0]?.transcript?.trim() ?? "";
+    if (!t) return;
+    const base = speechBaseRef.current.trim();
+    setInput(base ? `${base} ${t}` : t);
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    setIsListening(false);
+    const code = event.error;
+    if (code === "not-allowed" || code === "audio-capture") {
+      Alert.alert(
+        "Microphone access needed",
+        "Allow microphone and speech recognition in Settings to use voice input.",
+      );
+      return;
+    }
+    if (code === "aborted" || code === "no-speech") return;
+    Alert.alert(
+      "Voice input",
+      event.message || code || "Speech recognition failed.",
+    );
+  });
+
+  const stopRecording = useCallback(() => {
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch (e) {
+      console.error(e);
+    }
+    setIsListening(false);
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    if (isLoading) return;
+    if (isListening) {
+      stopRecording();
+      return;
+    }
+    try {
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "Microphone access needed",
+          "Allow microphone and speech recognition to turn your voice into text.",
+        );
+        return;
+      }
+      speechBaseRef.current = input;
+      const replyLocale = inferUserMessageLocale(input);
+      const lang = replyLocale === "en" ? "en-US" : "ko-KR";
+      const androidApi =
+        typeof Platform.Version === "number"
+          ? Platform.Version
+          : parseInt(String(Platform.Version), 10);
+      const continuous =
+        Platform.OS !== "android" ||
+        (Number.isFinite(androidApi) && androidApi >= 33);
+      ExpoSpeechRecognitionModule.start({
+        lang,
+        interimResults: true,
+        continuous,
+      });
+    } catch (e) {
+      console.error(e);
+      Alert.alert(
+        "Voice input",
+        e?.message ?? "Could not start speech recognition.",
+      );
+    }
+  }, [input, isLoading, isListening, stopRecording]);
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
@@ -558,6 +656,27 @@ function PetHealthChat() {
           >
             <Ionicons name="images-outline" size={22} color="#ffffff" />
           </TouchableOpacity>
+          {isSpeechRecognitionAvailable ? (
+            <TouchableOpacity
+              onPress={startRecording}
+              disabled={isLoading}
+              accessibilityLabel={
+                isListening ? "Stop voice input" : "Start voice input"
+              }
+              style={[
+                styles.sendButton,
+                styles.inputRowLeadingIcon,
+                isListening && styles.micButtonListening,
+                isLoading && styles.sendButtonDisabled,
+              ]}
+            >
+              <Ionicons
+                name={isListening ? "mic" : "mic-outline"}
+                size={22}
+                color={isListening ? "#FDE047" : "#ffffff"}
+              />
+            </TouchableOpacity>
+          ) : null}
           <TextInput
             value={input}
             onChangeText={setInput}
@@ -747,6 +866,9 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     opacity: 0.5,
+  },
+  micButtonListening: {
+    backgroundColor: "#e85d75",
   },
   sendIcon: {
     fontSize: 18,
