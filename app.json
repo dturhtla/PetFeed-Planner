@@ -36,6 +36,13 @@
         }
       ],
       [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Allow the microphone to turn your voice into text for pet questions.",
+          "speechRecognitionPermission": "Allow speech recognition to transcribe your voice for pet questions."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",

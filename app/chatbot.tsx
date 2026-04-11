@@ -7,6 +7,11 @@ import {
   visionAnalysisUserPrompt,
   wrapUserMessageForModelLanguage,
 } from "../utils/chatLocale";
+import {
+  ExpoSpeechRecognitionModule,
+  isSpeechRecognitionAvailable,
+  useSpeechRecognitionEvent,
+} from "../utils/speechRecognitionSafe";
 import { parseBrandRecommendationsFromModelText } from "@/utils/brandRecommendation";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -158,7 +163,10 @@ export default function ChatbotScreen() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isListening, setIsListening] = useState(false);
   const listRef = useRef<FlatList<ChatMessage>>(null);
+  /** Text in the input when the user started voice input (prepended to transcript). */
+  const speechBaseRef = useRef("");
   const chatSessionRef = useRef<ChatSession | null>(null);
   const modelRef = useRef<GenerativeModel | null>(null);
   /** Which TEXT_MODELS entry is used for the active chat session (advance on 429 / quota). */
@@ -177,6 +185,16 @@ export default function ChatbotScreen() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    return () => {
+      try {
+        ExpoSpeechRecognitionModule.abort();
+      } catch {
+        /* not listening or native unavailable */
+      }
+    };
+  }, []);
 
   const getOrCreateChatSession = () => {
     if (!modelRef.current) {
@@ -452,6 +470,90 @@ export default function ChatbotScreen() {
     ]);
   };
 
+  useSpeechRecognitionEvent("start", () => {
+    setIsListening(true);
+  });
+
+  useSpeechRecognitionEvent("end", () => {
+    setIsListening(false);
+  });
+
+  useSpeechRecognitionEvent("result", (event) => {
+    const e = event as {
+      results?: { transcript?: string }[];
+    };
+    const t = e.results?.[0]?.transcript?.trim() ?? "";
+    if (!t) return;
+    const base = speechBaseRef.current.trim();
+    setInput(base ? `${base} ${t}` : t);
+  });
+
+  useSpeechRecognitionEvent("error", (event) => {
+    const e = event as { error: string; message: string };
+    setIsListening(false);
+    const code = e.error;
+    if (code === "not-allowed" || code === "audio-capture") {
+      Alert.alert(
+        "마이크 권한",
+        "음성 입력을 사용하려면 설정에서 마이크와 음성 인식을 허용해 주세요.",
+      );
+      return;
+    }
+    if (code === "aborted" || code === "no-speech") return;
+    Alert.alert(
+      "음성 입력",
+      e.message || code || "음성 인식에 실패했습니다.",
+    );
+  });
+
+  const stopRecording = useCallback(() => {
+    try {
+      ExpoSpeechRecognitionModule.stop();
+    } catch (e) {
+      console.error(e);
+    }
+    setIsListening(false);
+  }, []);
+
+  const startRecording = useCallback(async () => {
+    if (isLoading) return;
+    if (isListening) {
+      stopRecording();
+      return;
+    }
+    try {
+      const perm = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          "마이크 권한",
+          "음성을 글자로 바꾸려면 마이크와 음성 인식 권한이 필요합니다.",
+        );
+        return;
+      }
+      speechBaseRef.current = input;
+      const replyLocale = inferUserMessageLocale(input);
+      const lang = replyLocale === "en" ? "en-US" : "ko-KR";
+      const androidApi =
+        typeof Platform.Version === "number"
+          ? Platform.Version
+          : parseInt(String(Platform.Version), 10);
+      const continuous =
+        Platform.OS !== "android" ||
+        (Number.isFinite(androidApi) && androidApi >= 33);
+      ExpoSpeechRecognitionModule.start({
+        lang,
+        interimResults: true,
+        continuous,
+      });
+    } catch (e) {
+      console.error(e);
+      Alert.alert(
+        "음성 입력",
+        (e as Error)?.message ?? "음성 인식을 시작할 수 없습니다.",
+      );
+    }
+  }, [input, isLoading, isListening, stopRecording]);
+
   const sendMessage = async () => {
     const text = input.trim();
     if (!text || isLoading) return;
@@ -678,6 +780,26 @@ export default function ChatbotScreen() {
             >
               <Ionicons name="images-outline" size={22} color="#ffffff" />
             </TouchableOpacity>
+            {isSpeechRecognitionAvailable ? (
+              <TouchableOpacity
+                onPress={startRecording}
+                disabled={isLoading}
+                accessibilityLabel={
+                  isListening ? "음성 입력 중지" : "음성 입력 시작"
+                }
+                style={[
+                  styles.attachButton,
+                  isListening && styles.micButtonListening,
+                  isLoading && styles.sendButtonDisabled,
+                ]}
+              >
+                <Ionicons
+                  name={isListening ? "mic" : "mic-outline"}
+                  size={22}
+                  color={isListening ? "#FDE047" : "#ffffff"}
+                />
+              </TouchableOpacity>
+            ) : null}
             <TextInput
               value={input}
               onChangeText={setInput}
@@ -879,6 +1001,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "#2F6B57",
     marginRight: 8,
+  },
+  micButtonListening: {
+    backgroundColor: "#c4455a",
   },
   sendButton: {
     width: 44,
