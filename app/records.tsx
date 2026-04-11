@@ -45,6 +45,9 @@ type FeedingRecord = {
   amount: string;
   time: string;
   sortKey?: number;
+  source?: "alarm" | "manual";
+  alarmId?: string;
+  feedingType: "아침" | "점심" | "저녁";
 };
 
 type FoodItem = {
@@ -68,43 +71,13 @@ type AlarmItem = {
   enabled: boolean;
 };
 
-const DEFAULT_FOOD_LIBRARY: FoodItem[] = [
-  {
-    id: "1",
-    name: "로얄캐닌 키튼",
-    subLabel: "육묘용 50g",
-    gramLabel: "50g",
-  },
-  {
-    id: "2",
-    name: "힐스 사이언스 다이어트",
-    subLabel: "40g",
-    gramLabel: "40g",
-  },
-  {
-    id: "3",
-    name: "캐니노 프로플랜",
-    subLabel: "45g",
-    gramLabel: "45g",
-  },
-  {
-    id: "4",
-    name: "네추럴발란스",
-    subLabel: "35g",
-    gramLabel: "35g",
-  },
-  {
-    id: "5",
-    name: "오리젠 키튼",
-    subLabel: "30g",
-    gramLabel: "30g",
-  },
-];
-
+const FEEDING_TYPE_OPTIONS = ["아침", "점심", "저녁"] as const;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 const getAlarmKey = (email: string, petId: string) =>
   `feeding_alarms_${email}_${petId}`;
+
+const getFoodsKey = (email: string) => `savedFoods_${email}`;
 
 function createInitialTime() {
   const date = new Date();
@@ -194,6 +167,10 @@ export default function RecordsScreen() {
   const [petProfiles, setPetProfiles] = useState<PetProfileItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<string>("");
 
+  const [selectedFeedingType, setSelectedFeedingType] = useState<
+    "아침" | "점심" | "저녁"
+  >("아침");
+
   const [records, setRecords] = useState<FeedingRecord[]>([]);
 
   const [nearestAlarm, setNearestAlarm] = useState<AlarmItem | null>(null);
@@ -208,8 +185,12 @@ export default function RecordsScreen() {
   const [isAddFoodFormVisible, setIsAddFoodFormVisible] = useState(false);
   const [isFromAlarm, setIsFromAlarm] = useState(false);
 
-  const [foodLibrary, setFoodLibrary] =
-    useState<FoodItem[]>(DEFAULT_FOOD_LIBRARY);
+  const [isDeleteMode, setIsDeleteMode] = useState(false);
+  const [selectedManualRecordIds, setSelectedManualRecordIds] = useState<
+    string[]
+  >([]);
+
+  const [foodLibrary, setFoodLibrary] = useState<FoodItem[]>([]);
   const [selectedFood, setSelectedFood] = useState<FoodItem | null>(null);
   const [tempSelectedFood, setTempSelectedFood] = useState<FoodItem | null>(
     null,
@@ -220,6 +201,8 @@ export default function RecordsScreen() {
 
   const [amount, setAmount] = useState("0");
   const [selectedTime, setSelectedTime] = useState<Date>(createInitialTime());
+
+  const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
 
   const getRecordsKey = (email: string) => `feedingRecords_${email}`;
 
@@ -234,14 +217,26 @@ export default function RecordsScreen() {
   const formatDisplayTime = (date: Date) => {
     const hours = date.getHours();
     const minutes = date.getMinutes();
-    const isPM = hours >= 12;
-    const period = isPM ? "PM" : "AM";
-    const displayHour = hours % 12 === 0 ? 12 : hours % 12;
 
-    return `${String(displayHour).padStart(2, "0")}:${String(minutes).padStart(
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(
       2,
       "0",
-    )} ${period}`;
+    )}`;
+  };
+
+  const normalizeRecordTime = (time: string) => {
+    const [timePart, meridiem] = time.split(" ");
+
+    if (!meridiem) return timePart;
+
+    const [rawHour, rawMinute] = timePart.split(":");
+    let hour = Number(rawHour);
+    const minute = Number(rawMinute);
+
+    if (meridiem === "PM" && hour !== 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   };
 
   const resetAddForm = useCallback(() => {
@@ -249,12 +244,14 @@ export default function RecordsScreen() {
     setTempSelectedFood(null);
     setAmount("0");
     setSelectedTime(createInitialTime());
+    setSelectedFeedingType("아침");
     setIsFoodSheetVisible(false);
     setIsTimePickerVisible(false);
     setIsAddFoodFormVisible(false);
     setNewFoodName("");
     setNewFoodGram("");
     setIsFromAlarm(false);
+    setSelectedAlarmId(null);
   }, []);
 
   const closeAddModal = useCallback(() => {
@@ -262,12 +259,15 @@ export default function RecordsScreen() {
     resetAddForm();
   }, [resetAddForm]);
 
+  const exitDeleteMode = useCallback(() => {
+    setIsDeleteMode(false);
+    setSelectedManualRecordIds([]);
+  }, []);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-          return gestureState.dy > 6;
-        },
+        onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 6,
         onPanResponderRelease: (_, gestureState) => {
           if (
             gestureState.dy > 45 &&
@@ -284,9 +284,7 @@ export default function RecordsScreen() {
   const foodSheetPanResponder = useMemo(
     () =>
       PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gestureState) => {
-          return gestureState.dy > 6;
-        },
+        onMoveShouldSetPanResponder: (_, gestureState) => gestureState.dy > 6,
         onPanResponderRelease: (_, gestureState) => {
           if (gestureState.dy > 45) {
             setIsFoodSheetVisible(false);
@@ -306,6 +304,7 @@ export default function RecordsScreen() {
         setPetProfiles([]);
         setSelectedPetId("");
         setRecords([]);
+        setFoodLibrary([]);
         setNearestAlarm(null);
         setHasAnyEnabledAlarm(false);
         setTodayFeedingSchedules([]);
@@ -323,6 +322,7 @@ export default function RecordsScreen() {
         `petProfile_${email}`,
       );
       const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
+      const savedFoods = await AsyncStorage.getItem(getFoodsKey(email));
 
       let loadedProfiles: PetProfileItem[] = [];
 
@@ -373,6 +373,13 @@ export default function RecordsScreen() {
         setRecords(Array.isArray(parsedRecords) ? parsedRecords : []);
       } else {
         setRecords([]);
+      }
+
+      if (savedFoods) {
+        const parsedFoods = JSON.parse(savedFoods);
+        setFoodLibrary(Array.isArray(parsedFoods) ? parsedFoods : []);
+      } else {
+        setFoodLibrary([]);
       }
     } catch (error) {
       console.log(error);
@@ -440,28 +447,122 @@ export default function RecordsScreen() {
       });
   }, [records, selectedPetId]);
 
+  const manualRecords = useMemo(() => {
+    return filteredRecords.filter((record) => record.source === "manual");
+  }, [filteredRecords]);
+
+  const combinedTimelineItems = useMemo(() => {
+    const alarmItems = todayFeedingSchedules.map((alarm) => ({
+      id: `alarm-${alarm.id}`,
+      type: "alarm" as const,
+      sortMinutes: getAlarmSortValue(alarm),
+      alarm,
+    }));
+
+    const manualItems = manualRecords.map((record) => {
+      const [timePart, meridiem] = record.time.split(" ");
+      const [rawHour, rawMinute] = timePart.split(":");
+      let hour = Number(rawHour);
+      const minute = Number(rawMinute);
+
+      if (meridiem === "PM" && hour !== 12) {
+        hour += 12;
+      }
+      if (meridiem === "AM" && hour === 12) {
+        hour = 0;
+      }
+
+      return {
+        id: `manual-${record.id}`,
+        type: "manual" as const,
+        sortMinutes: hour * 60 + minute,
+        record,
+      };
+    });
+
+    return [...alarmItems, ...manualItems].sort(
+      (a, b) => a.sortMinutes - b.sortMinutes,
+    );
+  }, [todayFeedingSchedules, manualRecords]);
+
   const selectedPet = useMemo(() => {
     return petProfiles.find((pet) => pet.id === selectedPetId);
   }, [petProfiles, selectedPetId]);
 
+  const isFedFromAlarm = useCallback(
+    (alarm: AlarmItem) => {
+      const today = formatDate();
+
+      return records.some(
+        (record) =>
+          record.petId === selectedPetId &&
+          record.date === today &&
+          record.source === "alarm" &&
+          record.alarmId === alarm.id,
+      );
+    },
+    [records, selectedPetId],
+  );
+
+  const isMissedAlarm = useCallback(
+    (alarm: AlarmItem) => {
+      if (isFedFromAlarm(alarm)) return false;
+
+      const now = new Date();
+      const today = new Date();
+
+      today.setHours(to24Hour(alarm.period, alarm.hour));
+      today.setMinutes(Number(alarm.minute));
+      today.setSeconds(0);
+      today.setMilliseconds(0);
+
+      const missedBase = new Date(today);
+      missedBase.setHours(missedBase.getHours() + 2);
+
+      return now > missedBase;
+    },
+    [isFedFromAlarm],
+  );
+
+  const previewAlarm = useMemo(() => {
+    return nearestAlarm;
+  }, [nearestAlarm]);
+
+  const previewAlarmDayLabel = useMemo(() => {
+    if (!previewAlarm) return null;
+
+    const now = new Date();
+
+    for (let addDay = 0; addDay < 7; addDay++) {
+      const candidate = new Date(now);
+      candidate.setDate(now.getDate() + addDay);
+
+      const dayKor = DAYS[candidate.getDay()];
+      if (!matchesDay(previewAlarm, dayKor)) continue;
+
+      candidate.setHours(to24Hour(previewAlarm.period, previewAlarm.hour));
+      candidate.setMinutes(Number(previewAlarm.minute));
+      candidate.setSeconds(0);
+      candidate.setMilliseconds(0);
+
+      if (candidate <= now) continue;
+
+      if (addDay === 0) return "오늘";
+      if (addDay === 1) return "내일";
+      return `${addDay}일 후`;
+    }
+
+    return null;
+  }, [previewAlarm]);
+
+  const missedAlarmCount = useMemo(() => {
+    return todayFeedingSchedules.filter((alarm) => isMissedAlarm(alarm)).length;
+  }, [todayFeedingSchedules, isMissedAlarm]);
+
   const handleSaveRecord = async () => {
-    if (!userEmail || !selectedPetId) {
-      console.log("저장실패: userEmail 또는 selectedPetId 없음", {
-        userEmail,
-        selectedPetId,
-      });
-      return;
-    }
-
-    if (!selectedFood) {
-      console.log("저장실패: selectedFood 없음");
-      return;
-    }
-
-    if (!amount.trim()) {
-      console.log("저장 실패: amount 비어 있음");
-      return;
-    }
+    if (!userEmail || !selectedPetId) return;
+    if (!selectedFood) return;
+    if (!amount.trim()) return;
 
     try {
       const newRecord: FeedingRecord = {
@@ -472,6 +573,9 @@ export default function RecordsScreen() {
         amount: `${amount}g`,
         time: formatDisplayTime(selectedTime),
         sortKey: Date.now(),
+        source: isFromAlarm ? "alarm" : "manual",
+        alarmId: isFromAlarm ? (selectedAlarmId ?? undefined) : undefined,
+        feedingType: selectedFeedingType,
       };
 
       const updatedRecords = [...records, newRecord];
@@ -486,6 +590,40 @@ export default function RecordsScreen() {
     } catch (error) {
       console.log("handleSaveRecord error: ", error);
     }
+  };
+
+  const handleDeleteSelectedManualRecords = async () => {
+    if (!userEmail || selectedManualRecordIds.length === 0) return;
+
+    try {
+      const updatedRecords = records.filter(
+        (record) => !selectedManualRecordIds.includes(record.id),
+      );
+
+      setRecords(updatedRecords);
+
+      await AsyncStorage.setItem(
+        getRecordsKey(userEmail),
+        JSON.stringify(updatedRecords),
+      );
+
+      exitDeleteMode();
+    } catch (error) {
+      console.log("handleDeleteSelectedManualRecords error: ", error);
+    }
+  };
+
+  const enterDeleteMode = (recordId: string) => {
+    setIsDeleteMode(true);
+    setSelectedManualRecordIds([recordId]);
+  };
+
+  const toggleManualRecordSelection = (recordId: string) => {
+    setSelectedManualRecordIds((prev) =>
+      prev.includes(recordId)
+        ? prev.filter((id) => id !== recordId)
+        : [...prev, recordId],
+    );
   };
 
   const handleDecreaseAmount = () => {
@@ -531,7 +669,9 @@ export default function RecordsScreen() {
     }
   };
 
-  const handleAddNewFood = () => {
+  const handleAddNewFood = async () => {
+    if (!userEmail) return;
+
     const trimmedName = newFoodName.trim();
     const trimmedGram = newFoodGram.trim();
 
@@ -540,19 +680,56 @@ export default function RecordsScreen() {
     const gramOnly = trimmedGram.replace(/[^0-9]/g, "");
     if (!gramOnly) return;
 
-    const newItem: FoodItem = {
-      id: `custom-${Date.now()}`,
-      name: trimmedName,
-      subLabel: `${gramOnly}g`,
-      gramLabel: `${gramOnly}g`,
-      isCustom: true,
-    };
+    try {
+      const newItem: FoodItem = {
+        id: `custom-${Date.now()}`,
+        name: trimmedName,
+        subLabel: `${gramOnly}g`,
+        gramLabel: `${gramOnly}g`,
+        isCustom: true,
+      };
 
-    setFoodLibrary((prev) => [newItem, ...prev]);
-    setTempSelectedFood(newItem);
-    setIsAddFoodFormVisible(false);
-    setNewFoodName("");
-    setNewFoodGram("");
+      const updatedFoods = [newItem, ...foodLibrary];
+      setFoodLibrary(updatedFoods);
+      setTempSelectedFood(newItem);
+
+      await AsyncStorage.setItem(
+        getFoodsKey(userEmail),
+        JSON.stringify(updatedFoods),
+      );
+
+      setIsAddFoodFormVisible(false);
+      setNewFoodName("");
+      setNewFoodGram("");
+    } catch (error) {
+      console.log("handleAddNewFood error: ", error);
+    }
+  };
+
+  const handleDeleteFood = async (foodId: string) => {
+    if (!userEmail) return;
+
+    try {
+      const updatedFoods = foodLibrary.filter((item) => item.id !== foodId);
+
+      setFoodLibrary(updatedFoods);
+
+      if (selectedFood?.id === foodId) {
+        setSelectedFood(null);
+        setTempSelectedFood(null);
+      }
+
+      if (tempSelectedFood?.id === foodId) {
+        setTempSelectedFood(null);
+      }
+
+      await AsyncStorage.setItem(
+        getFoodsKey(userEmail),
+        JSON.stringify(updatedFoods),
+      );
+    } catch (error) {
+      console.log("handleDeleteFood error: ", error);
+    }
   };
 
   const handlePressRecordFromSchedule = (alarm: AlarmItem) => {
@@ -567,9 +744,11 @@ export default function RecordsScreen() {
     };
 
     setIsFromAlarm(true);
+    setSelectedAlarmId(alarm.id);
     setSelectedFood(foundFood);
     setTempSelectedFood(foundFood);
     setAmount(String(alarm.amount));
+    setSelectedFeedingType(alarm.feedingType);
     setSelectedTime(createDateFromAlarm(alarm));
     setIsAddModalVisible(true);
   };
@@ -577,6 +756,7 @@ export default function RecordsScreen() {
   const handlePressAddButton = () => {
     resetAddForm();
     setIsFromAlarm(false);
+    setSelectedAlarmId(null);
     setIsAddModalVisible(true);
   };
 
@@ -585,7 +765,13 @@ export default function RecordsScreen() {
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}
-          onPress={() => router.back()}
+          onPress={() => {
+            if (isDeleteMode) {
+              exitDeleteMode();
+              return;
+            }
+            router.back();
+          }}
         >
           <Ionicons name="chevron-back" size={24} color="#2F6B57" />
         </TouchableOpacity>
@@ -625,7 +811,7 @@ export default function RecordsScreen() {
                   <Ionicons
                     name={pet.petType === "강아지" ? "paw" : "logo-octocat"}
                     size={24}
-                    color={isSelected ? "#2F6B57" : "#7C7C7C"}
+                    color="#111111"
                   />
                 </View>
 
@@ -643,7 +829,7 @@ export default function RecordsScreen() {
           })}
         </ScrollView>
 
-        {!hasAnyEnabledAlarm || !nearestAlarm ? (
+        {!hasAnyEnabledAlarm || !previewAlarm ? (
           <TouchableOpacity
             style={styles.noticeBox}
             activeOpacity={0.85}
@@ -672,91 +858,82 @@ export default function RecordsScreen() {
             </View>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity
-            style={styles.alarmPreviewBox}
-            activeOpacity={0.85}
-            onPress={() =>
-              router.push({
-                pathname: "/feeding-alarm",
-                params: {
-                  petId: selectedPetId,
-                  petName: selectedPet?.name ?? "",
-                },
-              })
-            }
-          >
-            <View style={styles.alarmPreviewLeft}>
-              <Ionicons
-                name="notifications-outline"
-                size={18}
-                color="#D2A11D"
-                style={styles.alarmBellIcon}
-              />
+          <>
+            <TouchableOpacity
+              style={styles.alarmPreviewBox}
+              activeOpacity={0.85}
+              onPress={() =>
+                router.push({
+                  pathname: "/feeding-alarm",
+                  params: {
+                    petId: selectedPetId,
+                    petName: selectedPet?.name ?? "",
+                  },
+                })
+              }
+            >
+              <View style={styles.alarmPreviewLeft}>
+                <Ionicons
+                  name="notifications-outline"
+                  size={18}
+                  color="#D2A11D"
+                  style={styles.alarmBellIcon}
+                />
 
-              <Text style={styles.alarmPreviewTime}>
-                {formatAlarmDisplayTime(nearestAlarm)}
-              </Text>
+                <View style={styles.alarmPreviewTimeWrap}>
+                  {previewAlarmDayLabel ? (
+                    <View style={styles.alarmDayBadge}>
+                      <Text style={styles.alarmDayBadgeText}>
+                        {previewAlarmDayLabel}
+                      </Text>
+                    </View>
+                  ) : null}
 
-              <View style={styles.alarmPreviewTextWrap}>
-                <Text style={styles.alarmPreviewMeta}>
-                  {nearestAlarm.feedingType}{" "}
-                  {nearestAlarm.days?.length
-                    ? nearestAlarm.days.join(" / ")
-                    : "매일"}
-                </Text>
-                <Text style={styles.alarmPreviewFood}>
-                  {nearestAlarm.foodName} {nearestAlarm.amount}g
+                  <Text style={styles.alarmPreviewTime}>
+                    {formatAlarmDisplayTime(previewAlarm)}
+                  </Text>
+                </View>
+
+                <View style={styles.alarmPreviewTextWrap}>
+                  <Text style={styles.alarmPreviewMeta}>
+                    {previewAlarm.feedingType}{" "}
+                    {previewAlarm.days?.length
+                      ? previewAlarm.days.join(" / ")
+                      : "매일"}
+                  </Text>
+                  <Text style={styles.alarmPreviewFood}>
+                    {previewAlarm.foodName} {previewAlarm.amount}g
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.alarmPreviewEditWrap}>
+                <Text style={styles.alarmPreviewEditText}>편집</Text>
+                <Ionicons name="chevron-forward" size={16} color="#D06B33" />
+              </View>
+            </TouchableOpacity>
+
+            {missedAlarmCount > 0 ? (
+              <View style={styles.missedHintBox}>
+                <Ionicons
+                  name="warning-outline"
+                  size={16}
+                  color="#C65A2E"
+                  style={styles.missedHintIcon}
+                />
+                <Text style={styles.missedHintText}>
+                  오늘 미지급 {missedAlarmCount}건이 있어요
                 </Text>
               </View>
-            </View>
-
-            <View style={styles.alarmPreviewEditWrap}>
-              <Text style={styles.alarmPreviewEditText}>편집</Text>
-              <Ionicons name="chevron-forward" size={16} color="#D06B33" />
-            </View>
-          </TouchableOpacity>
+            ) : null}
+          </>
         )}
 
         <View style={styles.recordSectionHeader}>
           <Text style={styles.recordSectionTitle}>기록 내역</Text>
         </View>
 
-        {todayFeedingSchedules.length > 0 ? (
-          <View style={styles.scheduleList}>
-            {todayFeedingSchedules.map((alarm) => (
-              <View key={alarm.id} style={styles.scheduleCard}>
-                <View style={styles.scheduleBar} />
-
-                <View style={styles.scheduleInner}>
-                  <View style={styles.scheduleTextWrap}>
-                    <Text style={styles.scheduleTime}>
-                      {formatAlarmDisplayTime(alarm)} 예정
-                    </Text>
-                    <Text style={styles.scheduleFood}>{alarm.foodName}</Text>
-                    <Text style={styles.scheduleSub}>
-                      {alarm.amount}g | {alarm.feedingType}식사
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={styles.scheduleAction}
-                    activeOpacity={0.85}
-                    onPress={() => handlePressRecordFromSchedule(alarm)}
-                  >
-                    <Text style={styles.scheduleActionText}>급여 기록하기</Text>
-                    <Ionicons
-                      name="chevron-forward"
-                      size={16}
-                      color="#2F6B57"
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {filteredRecords.length === 0 && todayFeedingSchedules.length === 0 ? (
+        {combinedTimelineItems.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyTitle}>아직 급여 기록이 없어요</Text>
             <Text style={styles.emptyDesc}>
@@ -766,32 +943,169 @@ export default function RecordsScreen() {
           </View>
         ) : (
           <View style={styles.recordList}>
-            {filteredRecords.map((record) => (
-              <View key={record.id} style={styles.recordCard}>
-                <View style={styles.recordTopRow}>
-                  <Text style={styles.recordDate}>{record.date}</Text>
-                  <Text style={styles.recordTime}>{record.time}</Text>
-                </View>
-                <Text style={styles.recordFood}>{record.foodName}</Text>
-                <Text style={styles.recordAmount}>{record.amount}</Text>
-              </View>
-            ))}
+            {combinedTimelineItems.map((item) => {
+              if (item.type === "alarm") {
+                const alarm = item.alarm;
+                const isDone = isFedFromAlarm(alarm);
+                const isMissed = isMissedAlarm(alarm);
+
+                return (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={styles.scheduleCard}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      if (!isDone && !isDeleteMode) {
+                        handlePressRecordFromSchedule(alarm);
+                      }
+                    }}
+                  >
+                    <View
+                      style={[
+                        styles.scheduleBar,
+                        isDone && styles.scheduleBarDone,
+                        isMissed && styles.scheduleBarMissed,
+                      ]}
+                    />
+
+                    <View style={styles.scheduleInnerSimple}>
+                      <Text
+                        style={[
+                          styles.scheduleTimeSimple,
+                          isDone && styles.scheduleTimeDone,
+                          isMissed && styles.scheduleTimeMissed,
+                        ]}
+                      >
+                        {formatAlarmDisplayTime(alarm)}{" "}
+                        {isDone ? "완료" : isMissed ? "미지급" : "예정"}
+                      </Text>
+
+                      <Text style={styles.scheduleFoodSimple}>
+                        {alarm.foodName}
+                      </Text>
+
+                      <Text style={styles.scheduleSubSimple}>
+                        {alarm.amount}g / {alarm.feedingType}식사
+                      </Text>
+                    </View>
+
+                    {!isDone && !isDeleteMode ? (
+                      <View style={styles.scheduleActionInline}>
+                        <Text style={styles.scheduleActionInlineText}>
+                          급여기록하기
+                        </Text>
+                        <Ionicons
+                          name="chevron-forward"
+                          size={16}
+                          color="#2F6B57"
+                        />
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              }
+
+              const record = item.record;
+              const isSelected = selectedManualRecordIds.includes(record.id);
+
+              return (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.scheduleCard}
+                  activeOpacity={0.9}
+                  onLongPress={() => enterDeleteMode(record.id)}
+                  onPress={() => {
+                    if (isDeleteMode) {
+                      toggleManualRecordSelection(record.id);
+                    }
+                  }}
+                >
+                  <View style={[styles.scheduleBar, styles.scheduleBarDone]} />
+
+                  {isDeleteMode ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.recordCheckCircle,
+                        isSelected && styles.recordCheckCircleSelected,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => toggleManualRecordSelection(record.id)}
+                    >
+                      {isSelected ? (
+                        <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                      ) : null}
+                    </TouchableOpacity>
+                  ) : null}
+
+                  <View style={styles.scheduleInnerSimple}>
+                    <Text
+                      style={[
+                        styles.scheduleTimeSimple,
+                        styles.scheduleTimeDone,
+                      ]}
+                    >
+                      {normalizeRecordTime(record.time)} 완료
+                    </Text>
+
+                    <Text style={styles.scheduleFoodSimple}>
+                      {record.foodName}
+                    </Text>
+
+                    <Text style={styles.scheduleSubSimple}>
+                      {record.amount} / {record.feedingType}식사
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
       </ScrollView>
 
-      <TouchableOpacity
-        style={[
-          styles.fab,
-          {
-            bottom: insets.bottom + 20,
-          },
-        ]}
-        activeOpacity={0.85}
-        onPress={handlePressAddButton}
-      >
-        <Ionicons name="add" size={22} color="#FFFFFF" />
-      </TouchableOpacity>
+      {isDeleteMode ? (
+        <View
+          style={[
+            styles.deleteBar,
+            {
+              bottom: insets.bottom + 20,
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.deleteCancelButton}
+            activeOpacity={0.85}
+            onPress={exitDeleteMode}
+          >
+            <Text style={styles.deleteCancelButtonText}>취소</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.deleteConfirmButton,
+              selectedManualRecordIds.length === 0 &&
+                styles.deleteConfirmButtonDisabled,
+            ]}
+            activeOpacity={0.85}
+            onPress={handleDeleteSelectedManualRecords}
+            disabled={selectedManualRecordIds.length === 0}
+          >
+            <Text style={styles.deleteConfirmButtonText}>삭제</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <TouchableOpacity
+          style={[
+            styles.fab,
+            {
+              bottom: insets.bottom + 20,
+            },
+          ]}
+          activeOpacity={0.85}
+          onPress={handlePressAddButton}
+        >
+          <Ionicons name="add" size={22} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
 
       <Modal
         visible={isAddModalVisible}
@@ -855,6 +1169,33 @@ export default function RecordsScreen() {
                 </View>
               </View>
 
+              <View style={styles.recordTypeBox}>
+                {FEEDING_TYPE_OPTIONS.map((type) => {
+                  const isSelected = selectedFeedingType === type;
+
+                  return (
+                    <TouchableOpacity
+                      key={type}
+                      style={[
+                        styles.recordTypeChip,
+                        isSelected && styles.recordTypeChipSelected,
+                      ]}
+                      activeOpacity={0.85}
+                      onPress={() => setSelectedFeedingType(type)}
+                    >
+                      <Text
+                        style={[
+                          styles.recordTypeChipText,
+                          isSelected && styles.recordTypeChipTextSelected,
+                        ]}
+                      >
+                        {type}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
               <TouchableOpacity
                 style={styles.recordSelectBox}
                 activeOpacity={0.85}
@@ -911,7 +1252,6 @@ export default function RecordsScreen() {
               style={[styles.foodSheet, { paddingBottom: insets.bottom + 12 }]}
             >
               <View style={styles.sheetHandle} />
-
               <Text style={styles.foodSheetTitle}>사료 선택</Text>
 
               <ScrollView
@@ -920,107 +1260,208 @@ export default function RecordsScreen() {
                 nestedScrollEnabled
                 showsVerticalScrollIndicator={false}
               >
-                {foodLibrary.map((item) => {
-                  const isSelected = tempSelectedFood?.id === item.id;
+                {foodLibrary.length > 0 ? (
+                  <>
+                    {foodLibrary.map((item) => {
+                      const isSelected = tempSelectedFood?.id === item.id;
 
-                  return (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[
-                        styles.foodRow,
-                        isSelected && styles.foodRowSelected,
-                      ]}
-                      activeOpacity={0.85}
-                      onPress={() => setTempSelectedFood(item)}
-                    >
-                      <View style={styles.foodRowLeft}>
-                        <View
+                      return (
+                        <TouchableOpacity
+                          key={item.id}
                           style={[
-                            styles.foodRadio,
-                            isSelected && styles.foodRadioSelected,
+                            styles.foodRow,
+                            isSelected && styles.foodRowSelected,
                           ]}
+                          activeOpacity={0.85}
+                          onPress={() => setTempSelectedFood(item)}
+                        >
+                          <View style={styles.foodRowLeft}>
+                            <View
+                              style={[
+                                styles.foodRadio,
+                                isSelected && styles.foodRadioSelected,
+                              ]}
+                            />
+                            <View>
+                              <Text
+                                style={[
+                                  styles.foodRowName,
+                                  isSelected && styles.foodRowNameSelected,
+                                ]}
+                              >
+                                {item.name}
+                              </Text>
+                              <Text style={styles.foodRowSub}>
+                                {item.subLabel}
+                              </Text>
+                            </View>
+                          </View>
+
+                          <View style={styles.foodRowRight}>
+                            <Text style={styles.foodGram}>
+                              {item.gramLabel}
+                            </Text>
+
+                            {isSelected ? (
+                              <Ionicons
+                                name="checkmark"
+                                size={18}
+                                color="#57A88C"
+                                style={styles.foodCheckIcon}
+                              />
+                            ) : null}
+
+                            <TouchableOpacity
+                              activeOpacity={0.8}
+                              onPress={(e) => {
+                                e.stopPropagation();
+                                handleDeleteFood(item.id);
+                              }}
+                              style={styles.foodDeleteButton}
+                            >
+                              <Ionicons
+                                name="trash-outline"
+                                size={18}
+                                color="#9A9A9A"
+                              />
+                            </TouchableOpacity>
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {!isAddFoodFormVisible ? (
+                      <TouchableOpacity
+                        style={styles.addNewFoodButton}
+                        activeOpacity={0.85}
+                        onPress={() => setIsAddFoodFormVisible(true)}
+                      >
+                        <Ionicons name="add" size={16} color="#5D8A77" />
+                        <Text style={styles.addNewFoodText}>직접 입력하기</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.addFoodForm}>
+                        <Text style={styles.addFoodFormTitle}>
+                          새 사료 입력
+                        </Text>
+
+                        <TextInput
+                          style={styles.addFoodInput}
+                          placeholder="사료 이름 입력"
+                          placeholderTextColor="#A1AAA6"
+                          value={newFoodName}
+                          onChangeText={setNewFoodName}
                         />
-                        <View>
-                          <Text
-                            style={[
-                              styles.foodRowName,
-                              isSelected && styles.foodRowNameSelected,
-                            ]}
+
+                        <TextInput
+                          style={styles.addFoodInput}
+                          placeholder="권장 급여량 입력 (예: 40)"
+                          placeholderTextColor="#A1AAA6"
+                          value={newFoodGram}
+                          onChangeText={(text) =>
+                            setNewFoodGram(text.replace(/[^0-9]/g, ""))
+                          }
+                          keyboardType="numeric"
+                        />
+
+                        <View style={styles.addFoodButtonRow}>
+                          <TouchableOpacity
+                            style={styles.addFoodCancelButton}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              setIsAddFoodFormVisible(false);
+                              setNewFoodName("");
+                              setNewFoodGram("");
+                            }}
                           >
-                            {item.name}
-                          </Text>
-                          <Text style={styles.foodRowSub}>{item.subLabel}</Text>
+                            <Text style={styles.addFoodCancelButtonText}>
+                              취소
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={styles.addFoodSaveButton}
+                            activeOpacity={0.85}
+                            onPress={handleAddNewFood}
+                          >
+                            <Text style={styles.addFoodSaveButtonText}>
+                              추가
+                            </Text>
+                          </TouchableOpacity>
                         </View>
                       </View>
-
-                      <View style={styles.foodRowRight}>
-                        <Text style={styles.foodGram}>{item.gramLabel}</Text>
-                        {isSelected ? (
-                          <Ionicons
-                            name="checkmark"
-                            size={18}
-                            color="#57A88C"
-                          />
-                        ) : null}
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-
-                {!isAddFoodFormVisible ? (
-                  <TouchableOpacity
-                    style={styles.addNewFoodButton}
-                    activeOpacity={0.85}
-                    onPress={() => setIsAddFoodFormVisible(true)}
-                  >
-                    <Ionicons name="add" size={16} color="#5D8A77" />
-                    <Text style={styles.addNewFoodText}>새 사료 추가하기</Text>
-                  </TouchableOpacity>
+                    )}
+                  </>
                 ) : (
-                  <View style={styles.addFoodForm}>
-                    <Text style={styles.addFoodFormTitle}>새 사료 입력</Text>
-
-                    <TextInput
-                      style={styles.addFoodInput}
-                      placeholder="사료 이름 입력"
-                      placeholderTextColor="#A1AAA6"
-                      value={newFoodName}
-                      onChangeText={setNewFoodName}
-                    />
-
-                    <TextInput
-                      style={styles.addFoodInput}
-                      placeholder="권장 급여량 입력 (예: 40)"
-                      placeholderTextColor="#A1AAA6"
-                      value={newFoodGram}
-                      onChangeText={(text) =>
-                        setNewFoodGram(text.replace(/[^0-9]/g, ""))
-                      }
-                      keyboardType="numeric"
-                    />
-
-                    <View style={styles.addFoodButtonRow}>
-                      <TouchableOpacity
-                        style={styles.addFoodCancelButton}
-                        activeOpacity={0.85}
-                        onPress={() => {
-                          setIsAddFoodFormVisible(false);
-                          setNewFoodName("");
-                          setNewFoodGram("");
-                        }}
-                      >
-                        <Text style={styles.addFoodCancelButtonText}>취소</Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.addFoodSaveButton}
-                        activeOpacity={0.85}
-                        onPress={handleAddNewFood}
-                      >
-                        <Text style={styles.addFoodSaveButtonText}>추가</Text>
-                      </TouchableOpacity>
+                  <>
+                    <View style={styles.emptyFoodWrap}>
+                      <Text style={styles.emptyFoodText}>
+                        등록된 사료가 없어요
+                      </Text>
                     </View>
-                  </View>
+
+                    {!isAddFoodFormVisible ? (
+                      <TouchableOpacity
+                        style={styles.addNewFoodButton}
+                        activeOpacity={0.85}
+                        onPress={() => setIsAddFoodFormVisible(true)}
+                      >
+                        <Ionicons name="add" size={16} color="#5D8A77" />
+                        <Text style={styles.addNewFoodText}>직접 입력하기</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View style={styles.addFoodForm}>
+                        <Text style={styles.addFoodFormTitle}>
+                          새 사료 입력
+                        </Text>
+
+                        <TextInput
+                          style={styles.addFoodInput}
+                          placeholder="사료 이름 입력"
+                          placeholderTextColor="#A1AAA6"
+                          value={newFoodName}
+                          onChangeText={setNewFoodName}
+                        />
+
+                        <TextInput
+                          style={styles.addFoodInput}
+                          placeholder="권장 급여량 입력 (예: 40)"
+                          placeholderTextColor="#A1AAA6"
+                          value={newFoodGram}
+                          onChangeText={(text) =>
+                            setNewFoodGram(text.replace(/[^0-9]/g, ""))
+                          }
+                          keyboardType="numeric"
+                        />
+
+                        <View style={styles.addFoodButtonRow}>
+                          <TouchableOpacity
+                            style={styles.addFoodCancelButton}
+                            activeOpacity={0.85}
+                            onPress={() => {
+                              setIsAddFoodFormVisible(false);
+                              setNewFoodName("");
+                              setNewFoodGram("");
+                            }}
+                          >
+                            <Text style={styles.addFoodCancelButtonText}>
+                              취소
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={styles.addFoodSaveButton}
+                            activeOpacity={0.85}
+                            onPress={handleAddNewFood}
+                          >
+                            <Text style={styles.addFoodSaveButtonText}>
+                              추가
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </>
                 )}
               </ScrollView>
 
@@ -1141,7 +1582,7 @@ const styles = StyleSheet.create({
     width: 62,
     height: 62,
     borderRadius: 31,
-    backgroundColor: "#D3D3D3",
+    backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
@@ -1155,7 +1596,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
     fontFamily: "Nanum",
-    color: "#8A8A8A",
+    color: "#2F2F2F",
   },
   profileNameSelected: {
     color: "#2F6B57",
@@ -1195,11 +1636,31 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
 
+  alarmPreviewTimeWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    width: 120,
+  },
+
+  alarmDayBadge: {
+    backgroundColor: "#E7F4EE",
+    borderRadius: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    marginRight: 6,
+  },
+
+  alarmDayBadgeText: {
+    fontSize: 10,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+
   alarmPreviewBox: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: "#F1F0F0",
+    backgroundColor: "#ECECEC",
     borderRadius: 18,
     paddingHorizontal: 20,
     paddingVertical: 20,
@@ -1214,7 +1675,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   alarmPreviewTime: {
-    width: 78,
     fontSize: 22,
     fontFamily: "NanumB",
     color: "#2F6B57",
@@ -1262,55 +1722,81 @@ const styles = StyleSheet.create({
   },
   scheduleCard: {
     minHeight: 88,
-    backgroundColor: "#E9E9E9",
+    backgroundColor: "#ECECEC",
     borderRadius: 16,
     flexDirection: "row",
     overflow: "hidden",
+    alignItems: "stretch",
   },
   scheduleBar: {
     width: 6,
     backgroundColor: "#8F8F8F",
   },
-  scheduleInner: {
+  scheduleBarDone: {
+    backgroundColor: "#2F6B57",
+  },
+  scheduleBarMissed: {
+    backgroundColor: "#D14A3A",
+  },
+
+  scheduleTimeMissed: {
+    color: "#D14A3A",
+    fontFamily: "NanumB",
+  },
+  scheduleInnerSimple: {
     flex: 1,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "center",
   },
-  scheduleTextWrap: {
-    flex: 1,
-    marginRight: 10,
-  },
-  scheduleTime: {
-    fontSize: 12,
+  scheduleTimeSimple: {
+    fontSize: 11,
     fontFamily: "Nanum",
-    color: "#333333",
-    marginBottom: 6,
+    color: "#7A7A7A",
+    marginBottom: 4,
   },
-  scheduleFood: {
-    fontSize: 18,
+  scheduleTimeDone: {
+    color: "#2F6B57",
+    fontFamily: "NanumB",
+  },
+  scheduleFoodSimple: {
+    fontSize: 17,
     fontFamily: "NanumB",
     color: "#222222",
     marginBottom: 4,
   },
-  scheduleSub: {
-    fontSize: 13,
+  scheduleSubSimple: {
+    fontSize: 12,
     fontFamily: "Nanum",
-    color: "#8C8C8C",
+    color: "#8A8A8A",
   },
-  scheduleAction: {
+  scheduleActionInline: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 12,
+    paddingRight: 12,
   },
-  scheduleActionText: {
+  scheduleActionInlineText: {
     fontSize: 14,
     fontFamily: "NanumB",
     color: "#2F6B57",
     marginRight: 2,
+  },
+
+  recordCheckCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#B9B9B9",
+    backgroundColor: "#FFFFFF",
+    justifyContent: "center",
+    alignItems: "center",
+    alignSelf: "center",
+    marginLeft: 10,
+  },
+  recordCheckCircleSelected: {
+    backgroundColor: "#2F6B57",
+    borderColor: "#2F6B57",
   },
 
   emptyWrap: {
@@ -1336,40 +1822,6 @@ const styles = StyleSheet.create({
   recordList: {
     gap: 12,
   },
-  recordCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#E5E7EB",
-  },
-  recordTopRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 6,
-  },
-  recordDate: {
-    fontSize: 12,
-    fontFamily: "Nanum",
-    color: "#888888",
-  },
-  recordTime: {
-    fontSize: 12,
-    fontFamily: "Nanum",
-    color: "#888888",
-  },
-  recordFood: {
-    fontSize: 16,
-    fontFamily: "Nanum",
-    color: "#222222",
-    marginBottom: 4,
-  },
-  recordAmount: {
-    fontSize: 14,
-    fontFamily: "Nanum",
-    color: "#2F6B57",
-  },
 
   fab: {
     position: "absolute",
@@ -1387,6 +1839,43 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
 
+  deleteBar: {
+    position: "absolute",
+    left: 24,
+    right: 24,
+    flexDirection: "row",
+    gap: 12,
+  },
+  deleteCancelButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#C9C9C9",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  deleteCancelButtonText: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#222222",
+  },
+  deleteConfirmButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#C94F4F",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  deleteConfirmButtonDisabled: {
+    backgroundColor: "#E2A8A8",
+  },
+  deleteConfirmButtonText: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#FFFFFF",
+  },
+
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
@@ -1401,7 +1890,7 @@ const styles = StyleSheet.create({
   },
 
   bottomSheet: {
-    height: 300,
+    height: 352,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -1446,6 +1935,19 @@ const styles = StyleSheet.create({
   foodListContent: {
     paddingBottom: 12,
   },
+  emptyFoodWrap: {
+    minHeight: 140,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+  },
+  emptyFoodText: {
+    fontSize: 15,
+    fontFamily: "Nanum",
+    color: "#8A8A8A",
+    textAlign: "center",
+  },
+
   foodRow: {
     minHeight: 58,
     borderRadius: 12,
@@ -1691,5 +2193,64 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: "NanumB",
     color: "#FFFFFF",
+  },
+
+  recordTypeBox: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+    gap: 8,
+  },
+  recordTypeChip: {
+    flex: 1,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1.2,
+    borderColor: "#D7D7D7",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  recordTypeChipSelected: {
+    borderColor: "#2F6B57",
+    backgroundColor: "#EEF7F3",
+  },
+  recordTypeChipText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#7A7A7A",
+  },
+  recordTypeChipTextSelected: {
+    color: "#2F6B57",
+  },
+  missedHintBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFF4EC",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: -6,
+    marginBottom: 18,
+  },
+
+  missedHintIcon: {
+    marginRight: 6,
+  },
+
+  missedHintText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#C65A2E",
+  },
+
+  foodDeleteButton: {
+    marginLeft: 8,
+    padding: 2,
+  },
+
+  foodCheckIcon: {
+    marginLeft: 4,
   },
 });
