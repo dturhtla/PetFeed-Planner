@@ -39,7 +39,7 @@ LIFE_STAGE_MAP = {
     "노령견":     "senior",
     "비만견":     "obese",
     "임신견":     "pregnant",
-    "어린고양이":  "puppy",
+    "어린고양이":  "kitten",
     "성묘":       "adult",
     "중성화성묘":  "adult_neutered",
     "노령묘":     "senior",
@@ -59,13 +59,7 @@ async def analyze_food(
     health_conditions: str = "",
     image: UploadFile = File(...)
 ):
-    """
-    사료 포장지 이미지 분석 + 급여량 추천 API
-
-    - species: 강아지 / 고양이
-    - life_stage: 종에 맞는 생애단계 선택
-    - health_conditions: 쉼표로 구분 (예: kidney_disease,obesity)
-    """
+    print(f"받은 데이터: pet_name={pet_name}, species={species}, weight_kg={weight_kg}, age_year={age_year}, age_month={age_month}, life_stage={life_stage}")
 
     if image.content_type not in ["image/jpeg", "image/jpg", "image/png"]:
         raise HTTPException(
@@ -75,7 +69,7 @@ async def analyze_food(
 
     age_years_calc = age_year + (age_month / 12)
 
-    if age_years_calc <= 0:
+    if age_years_calc < 0:
         raise HTTPException(
             status_code=400,
             detail="나이를 입력해주세요. (age_year 또는 age_month 중 하나 이상)"
