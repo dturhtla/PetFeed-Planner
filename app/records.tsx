@@ -448,7 +448,11 @@ export default function RecordsScreen() {
   }, [records, selectedPetId]);
 
   const manualRecords = useMemo(() => {
-    return filteredRecords.filter((record) => record.source === "manual");
+    const today = formatDate();
+
+    return filteredRecords.filter(
+      (record) => record.source === "manual" && record.date === today,
+    );
   }, [filteredRecords]);
 
   const combinedTimelineItems = useMemo(() => {
