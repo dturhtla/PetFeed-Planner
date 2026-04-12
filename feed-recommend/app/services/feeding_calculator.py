@@ -1,3 +1,4 @@
+import asyncio
 import os
 from dotenv import load_dotenv
 from google import genai
@@ -53,24 +54,23 @@ def calculate_daily_kcal(species: str, weight_kg: float, life_stage: str) -> flo
     rer = 70 * (weight_kg ** 0.75)
 
     life_stage_factors = {
-    "dog": {
-        "puppy":          3.0,
-        "adult":          1.6,
-        "adult_neutered": 1.4,
-        "senior":         1.2,
-        "obese":          1.0,
-        "pregnant":       3.0,
+        "dog": {
+            "puppy":          3.0,
+            "adult":          1.6,
+            "adult_neutered": 1.4,
+            "senior":         1.2,
+            "obese":          1.0,
+            "pregnant":       3.0,
         },
-    "cat": {
-        "kitten":          1.5,
-        "adult":          1.2,
-        "adult_neutered": 1.0,
-        "senior":         1.1,
-        "obese":          0.8,
-        "pregnant":       2.0,
+        "cat": {
+            "kitten":         1.5,
+            "adult":          1.2,
+            "adult_neutered": 1.0,
+            "senior":         1.1,
+            "obese":          0.8,
+            "pregnant":       2.0,
         },
     }
-
 
     species_factors = life_stage_factors.get(species, life_stage_factors["dog"])
     factor = species_factors.get(life_stage, 1.6)
@@ -85,12 +85,12 @@ def check_ingredient_warnings(
 ) -> list:
     """종별 위험 성분 + 건강 상태별 위험 성분 교차 체크"""
     warnings = []
-    
+
     species_dangerous = {
         "dog": ["xylitol", "자일리톨", "포도", "grape", "양파", "onion",
-            "마늘", "garlic", "초콜릿", "chocolate", "카페인", "caffeine"],
+                "마늘", "garlic", "초콜릿", "chocolate", "카페인", "caffeine"],
         "cat": ["양파", "onion", "마늘", "garlic", "초콜릿", "chocolate",
-            "카페인", "caffeine", "참치통조림"],
+                "카페인", "caffeine", "참치통조림"],
     }
 
     condition_dangerous = {
@@ -190,12 +190,19 @@ async def calculate_feeding(
     kcal_per_100g = food.calories_per_100g if food.calories_per_100g else default_kcal.get(species, 385)
     formula_grams = (daily_kcal / kcal_per_100g) * 100
 
-    # 2. 브랜드 공식 권장량 검색 (제품명 인식된 경우만)
-    official_grams = None
-    if food.brand and food.product_name:
-        official_grams = await search_official_feeding_guide(
+    # 2. 공식 권장량 검색 + 추천 코멘트 병렬 처리
+    official_grams_result, recommendation_text = await asyncio.gather(
+        search_official_feeding_guide(
             food.brand, food.product_name, species, weight_kg, age_years
+        ) if food.brand and food.product_name else asyncio.sleep(0),
+        generate_recommendation_text(
+            pet_name, species, weight_kg, age_years,
+            life_stage, health_conditions, food,
+            formula_grams, None, None
         )
+    )
+
+    official_grams = official_grams_result if isinstance(official_grams_result, float) else None
 
     # 3. 교차 검증 및 최종 급여량 결정
     warning_message = None
@@ -204,11 +211,9 @@ async def calculate_feeding(
         diff_pct = abs(formula_grams - official_grams) / official_grams * 100
 
         if diff_pct > 20:
-            # 20% 이상 차이나면 공식 권장량 우선 + 경고
             final_grams = official_grams
             warning_message = f"수식 계산({formula_grams:.0f}g)과 공식 권장량({official_grams:.0f}g)이 {diff_pct:.0f}% 차이납니다. 공식 권장량을 우선 적용했어요."
         else:
-            # 20% 이내면 두 값의 평균
             final_grams = (formula_grams + official_grams) / 2
     else:
         final_grams = formula_grams
@@ -227,21 +232,14 @@ async def calculate_feeding(
         food.main_ingredients if food.main_ingredients else []
     )
 
-    # 6. AI 추천 코멘트 생성
-    recommendation_text = await generate_recommendation_text(
-        pet_name, species, weight_kg, age_years,
-        life_stage, health_conditions, food,
-        final_grams, official_grams, warning_message
-    )
-
     return {
-        "daily_grams":      round(final_grams),
-        "meals_per_day":    meals_per_day,
-        "grams_per_meal":   round(final_grams / meals_per_day),
-        "daily_kcal":       round(daily_kcal),
-        "formula_grams":    round(formula_grams),
-        "official_grams":   round(official_grams) if official_grams else None,
-        "warning":          warning_message,
-        "recommendation":   recommendation_text,
+        "daily_grams":         round(final_grams),
+        "meals_per_day":       meals_per_day,
+        "grams_per_meal":      round(final_grams / meals_per_day),
+        "daily_kcal":          round(daily_kcal),
+        "formula_grams":       round(formula_grams),
+        "official_grams":      round(official_grams) if official_grams else None,
+        "warning":             warning_message,
+        "recommendation":      recommendation_text,
         "ingredient_warnings": warnings
     }

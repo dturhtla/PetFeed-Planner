@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 const API_URL = "https://soulful-ouida-penetrably.ngrok-free.dev/food/analyze";
+const GO_SERVER_URL = "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
 
 type ProfileData = {
   name: string;
@@ -20,6 +21,7 @@ type ProfileData = {
   gender: string;
   petType: string;
   bcs: string;
+  diseases?: string[];
 };
 
 type FoodInfo = {
@@ -75,6 +77,17 @@ const getLifeStage = (
   }
 
   return petType === "강아지" ? "성견" : "성묘";
+};
+
+const bcsToNumber = (bcs: string): number => {
+  const bcsMap: { [key: string]: number } = {
+    "심한 저체중": 1,
+    "저체중": 3,
+    "정상": 5,
+    "과체중": 7,
+    "비만": 9,
+  };
+  return bcsMap[bcs] || 5;
 };
 
 export default function AnalysisResultScreen() {
@@ -139,7 +152,7 @@ export default function AnalysisResultScreen() {
         age_year: String(years),
         age_month: String(months),
         life_stage: lifeStage,
-        health_conditions: "",
+        health_conditions: (profile.diseases || []).join(","),
       });
 
       const formData = new FormData();
@@ -152,7 +165,7 @@ export default function AnalysisResultScreen() {
       console.log("API 호출 시작:", `${API_URL}?${queryParams.toString()}`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
 
       const response = await fetch(`${API_URL}?${queryParams.toString()}`, {
         method: "POST",
@@ -193,6 +206,28 @@ export default function AnalysisResultScreen() {
       if (result.status === "success") {
         setFoodInfo(result.food_info);
         setFeeding(result.feeding_recommendation);
+
+        // Go 서버에 분석 결과 저장
+        try {
+          await fetch(
+            `${GO_SERVER_URL}/api/v1/pets/${parsedUser.id}/analysis`,
+            {
+              method: "PATCH",
+              headers: {
+                "Content-Type": "application/json",
+                "ngrok-skip-browser-warning": "true",
+              },
+              body: JSON.stringify({
+                bcs: bcsToNumber(profile.bcs || ""),
+                recommended_amount: result.feeding_recommendation.daily_grams,
+              }),
+            }
+          );
+          console.log("Go 서버 저장 완료");
+        } catch (err) {
+          console.log("Go 서버 저장 실패:", err);
+        }
+
         return;
       }
 
