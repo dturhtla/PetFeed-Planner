@@ -219,7 +219,11 @@ function getDayLabel(days: string[]) {
   if (isWeekday) return "평일";
   if (isWeekend) return "주말";
 
-  return days.join(" / ");
+  const sortedDays = [...days].sort(
+    (a, b) => DAYS.indexOf(a) - DAYS.indexOf(b),
+  );
+
+  return sortedDays.join(" / ");
 }
 
 function formatDisplayTime(period: string, hour: string, minute: string) {
