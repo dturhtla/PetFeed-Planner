@@ -6,10 +6,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const API_BASE_URL =
+  "https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1";
 
 type ProfileData = {
   name?: string;
@@ -27,6 +31,12 @@ type LoggedInUser = {
   password: string;
 };
 
+const getGenderValue = (gender?: string) => {
+  if (gender?.includes("남")) return "M";
+  if (gender?.includes("여")) return "F";
+  return "N";
+};
+
 export default function ProfileCompleteScreen() {
   const [profiles, setProfiles] = useState<ProfileData[]>([]);
 
@@ -37,9 +47,7 @@ export default function ProfileCompleteScreen() {
         ? JSON.parse(savedUser)
         : null;
 
-      if (!parsedUser?.email) {
-        return;
-      }
+      if (!parsedUser?.email) return;
 
       const email = parsedUser.email;
       const profilesKey = `petProfiles_${email}`;
@@ -107,6 +115,37 @@ export default function ProfileCompleteScreen() {
 
       const email = parsedUser.email;
 
+      for (const profile of profiles) {
+        const petData = {
+          user_id: Number(parsedUser.id) || 1,
+          name: profile.name || "",
+          species: profile.petType === "고양이" ? "Cat" : "Dog",
+          breed: "none",
+          gender: getGenderValue(profile.gender),
+          current_weight: Number(profile.weight) || 0,
+          health_status: "none",
+        };
+
+        const response = await fetch(`${API_BASE_URL}/pets`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+          body: JSON.stringify(petData),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          console.log("반려동물 등록 실패:", data);
+          ToastAndroid.show("반려동물 등록에 실패했습니다", ToastAndroid.SHORT);
+          return;
+        }
+
+        console.log("반려동물 등록 성공:", data);
+      }
+
       await AsyncStorage.setItem(`profileCompleted_${email}`, "true");
       await AsyncStorage.removeItem(`petProfileFlowMode_${email}`);
 
@@ -115,10 +154,13 @@ export default function ProfileCompleteScreen() {
       );
       console.log("profile-complete completedValue:", completedValue);
 
+      ToastAndroid.show("프로필이 저장되었습니다", ToastAndroid.SHORT);
+
       router.dismissAll();
       router.replace("/home" as any);
     } catch (error) {
       console.log("profile-complete handleSaveProfile error:", error);
+      ToastAndroid.show("서버 연결 오류가 발생했습니다", ToastAndroid.SHORT);
     }
   };
 
@@ -137,7 +179,9 @@ export default function ProfileCompleteScreen() {
         ? profile.diseases.join(", ")
         : "없음";
 
-    return `${profile.age || "-"} / ${weightText} / ${profile.gender || "-"} / ${profile.bcs || "-"} / ${diseaseText}`;
+    return `${profile.age || "-"} / ${weightText} / ${profile.gender || "-"} / ${
+      profile.bcs || "-"
+    } / ${diseaseText}`;
   };
 
   return (
