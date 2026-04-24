@@ -43,6 +43,7 @@ type FeedingRecord = {
   date: string;
   foodName: string;
   amount: string;
+  eatenAmount?: string;
   time: string;
   sortKey?: number;
   source?: "alarm" | "manual";
@@ -160,6 +161,11 @@ function createDateFromAlarm(alarm: AlarmItem) {
   return date;
 }
 
+function getGramNumber(value?: string | number) {
+  if (value === undefined || value === null) return 0;
+  return Number(String(value).replace(/[^0-9.]/g, "")) || 0;
+}
+
 export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
 
@@ -200,6 +206,7 @@ export default function RecordsScreen() {
   const [newFoodGram, setNewFoodGram] = useState("");
 
   const [amount, setAmount] = useState("0");
+  const [eatenAmount, setEatenAmount] = useState("0");
   const [selectedTime, setSelectedTime] = useState<Date>(createInitialTime());
 
   const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
@@ -243,6 +250,7 @@ export default function RecordsScreen() {
     setSelectedFood(null);
     setTempSelectedFood(null);
     setAmount("0");
+    setEatenAmount("0");
     setSelectedTime(createInitialTime());
     setSelectedFeedingType("아침");
     setIsFoodSheetVisible(false);
@@ -493,11 +501,11 @@ export default function RecordsScreen() {
     return petProfiles.find((pet) => pet.id === selectedPetId);
   }, [petProfiles, selectedPetId]);
 
-  const isFedFromAlarm = useCallback(
+  const getAlarmRecord = useCallback(
     (alarm: AlarmItem) => {
       const today = formatDate();
 
-      return records.some(
+      return records.find(
         (record) =>
           record.petId === selectedPetId &&
           record.date === today &&
@@ -506,6 +514,11 @@ export default function RecordsScreen() {
       );
     },
     [records, selectedPetId],
+  );
+
+  const isFedFromAlarm = useCallback(
+    (alarm: AlarmItem) => Boolean(getAlarmRecord(alarm)),
+    [getAlarmRecord],
   );
 
   const isMissedAlarm = useCallback(
@@ -563,10 +576,74 @@ export default function RecordsScreen() {
     return todayFeedingSchedules.filter((alarm) => isMissedAlarm(alarm)).length;
   }, [todayFeedingSchedules, isMissedAlarm]);
 
+  const todayStats = useMemo(() => {
+    const today = formatDate();
+
+    const todayRecords = records.filter(
+      (record) => record.petId === selectedPetId && record.date === today,
+    );
+
+    const iotRecords = todayRecords.filter(
+      (record) => record.source === "alarm",
+    );
+    const manualTodayRecords = todayRecords.filter(
+      (record) => record.source === "manual",
+    );
+
+    const iotAmount = iotRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.amount),
+      0,
+    );
+
+    const manualAmount = manualTodayRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.amount),
+      0,
+    );
+
+    const scheduledAmount = todayFeedingSchedules.reduce(
+      (sum, alarm) => sum + alarm.amount,
+      0,
+    );
+
+    const givenAmount = iotAmount + manualAmount;
+
+    const eatenAmount = iotRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.eatenAmount ?? record.amount),
+      0,
+    );
+    const remainAmount = Math.max(iotAmount - eatenAmount, 0);
+
+    const completedCount = todayFeedingSchedules.filter((alarm) =>
+      isFedFromAlarm(alarm),
+    ).length;
+
+    const targetCount = todayFeedingSchedules.length;
+
+    return {
+      scheduledAmount,
+      givenAmount,
+      eatenAmount,
+      remainAmount,
+      iotAmount,
+      manualAmount,
+      manualCount: manualTodayRecords.length,
+      missedCount: missedAlarmCount,
+      completedCount,
+      targetCount,
+    };
+  }, [
+    records,
+    selectedPetId,
+    todayFeedingSchedules,
+    missedAlarmCount,
+    isFedFromAlarm,
+  ]);
+
   const handleSaveRecord = async () => {
     if (!userEmail || !selectedPetId) return;
     if (!selectedFood) return;
     if (!amount.trim()) return;
+    if (!eatenAmount.trim()) return;
 
     try {
       const newRecord: FeedingRecord = {
@@ -575,6 +652,7 @@ export default function RecordsScreen() {
         date: formatDate(),
         foodName: selectedFood.name,
         amount: `${amount}g`,
+        eatenAmount: `${eatenAmount}g`,
         time: formatDisplayTime(selectedTime),
         sortKey: Date.now(),
         source: isFromAlarm ? "alarm" : "manual",
@@ -640,6 +718,18 @@ export default function RecordsScreen() {
     const current = Number(amount || "0");
     const next = current + 5;
     setAmount(String(next));
+  };
+
+  const handleDecreaseEatenAmount = () => {
+    const current = Number(eatenAmount || "0");
+    const next = Math.max(0, current - 5);
+    setEatenAmount(String(next));
+  };
+
+  const handleIncreaseEatenAmount = () => {
+    const current = Number(eatenAmount || "0");
+    const next = current + 5;
+    setEatenAmount(String(next));
   };
 
   const openFoodSheet = () => {
@@ -752,6 +842,7 @@ export default function RecordsScreen() {
     setSelectedFood(foundFood);
     setTempSelectedFood(foundFood);
     setAmount(String(alarm.amount));
+    setEatenAmount(String(alarm.amount));
     setSelectedFeedingType(alarm.feedingType);
     setSelectedTime(createDateFromAlarm(alarm));
     setIsAddModalVisible(true);
@@ -916,22 +1007,125 @@ export default function RecordsScreen() {
                 <Ionicons name="chevron-forward" size={16} color="#D06B33" />
               </View>
             </TouchableOpacity>
-
-            {missedAlarmCount > 0 ? (
-              <View style={styles.missedHintBox}>
-                <Ionicons
-                  name="warning-outline"
-                  size={16}
-                  color="#C65A2E"
-                  style={styles.missedHintIcon}
-                />
-                <Text style={styles.missedHintText}>
-                  오늘 미지급 {missedAlarmCount}건이 있어요
-                </Text>
-              </View>
-            ) : null}
           </>
         )}
+
+        <View style={styles.todaySummaryCard}>
+          <Text style={styles.todaySummaryTitle}>오늘 급여 정보</Text>
+
+          <View style={styles.summaryTopRow}>
+            <View style={styles.summaryMiniBox}>
+              <Text style={styles.summaryMiniLabel}>준 양</Text>
+              <Text style={styles.summaryMiniValue}>
+                {todayStats.givenAmount}g
+              </Text>
+              <Text style={styles.summaryMiniSub}>IoT + 수동</Text>
+            </View>
+
+            <View style={styles.summaryMiniBox}>
+              <Text style={styles.summaryMiniLabel}>먹은 양</Text>
+              <Text
+                style={[styles.summaryMiniValue, styles.summaryMiniValueBlue]}
+              >
+                {todayStats.eatenAmount}g
+              </Text>
+              <Text style={styles.summaryMiniSub}>IoT 기준</Text>
+            </View>
+          </View>
+
+          <View style={styles.progressWrap}>
+            <View style={styles.progressTextRow}>
+              <Text style={styles.progressLabel}>준 양</Text>
+              <Text style={styles.progressValue}>
+                {todayStats.givenAmount}g
+              </Text>
+            </View>
+            <View style={styles.progressBarBg}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  {
+                    width: `${Math.min(
+                      100,
+                      todayStats.scheduledAmount > 0
+                        ? (todayStats.givenAmount /
+                            todayStats.scheduledAmount) *
+                            100
+                        : 0,
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
+          <View style={styles.progressWrap}>
+            <View style={styles.progressTextRow}>
+              <Text style={styles.progressLabel}>먹은 양</Text>
+              <Text style={[styles.progressValue, styles.progressValueBlue]}>
+                {todayStats.eatenAmount}g
+              </Text>
+            </View>
+            <View style={styles.progressBarBg}>
+              <View
+                style={[
+                  styles.progressBarFillBlue,
+                  {
+                    width: `${Math.min(
+                      100,
+                      todayStats.givenAmount > 0
+                        ? (todayStats.eatenAmount / todayStats.givenAmount) *
+                            100
+                        : 0,
+                    )}%`,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+
+          <View style={styles.summaryResultRow}>
+            <Text style={styles.summaryResultLabel}>남은 양</Text>
+            <Text style={styles.summaryResultValue}>
+              {todayStats.remainAmount}g
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.detailStatsCard}>
+          <Text style={styles.detailStatsTitle}>확장 통계</Text>
+
+          <View style={styles.statRow}>
+            <Text style={styles.statLabel}>IoT 급여량</Text>
+            <Text style={styles.statValue}>{todayStats.iotAmount}g</Text>
+          </View>
+
+          {todayStats.manualCount > 0 && (
+            <View style={styles.statRow}>
+              <Text style={styles.statLabel}>수동 급여량</Text>
+              <Text style={styles.statValue}>{todayStats.manualAmount}g</Text>
+            </View>
+          )}
+
+          {todayStats.missedCount > 0 && (
+            <View style={styles.statRow}>
+              <Text style={styles.statLabel}>미지급 횟수</Text>
+              <Text style={styles.statMissedValue}>
+                {todayStats.missedCount}회
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.statRowLast}>
+            <Text style={styles.statLabel}>급여 상태</Text>
+            <Text style={styles.statValue}>
+              {todayStats.completedCount}회
+              <Text style={styles.statTargetText}>
+                /목표 {todayStats.targetCount}회
+              </Text>
+            </Text>
+          </View>
+        </View>
 
         <View style={styles.recordSectionHeader}>
           <Text style={styles.recordSectionTitle}>기록 내역</Text>
@@ -950,7 +1144,8 @@ export default function RecordsScreen() {
             {combinedTimelineItems.map((item) => {
               if (item.type === "alarm") {
                 const alarm = item.alarm;
-                const isDone = isFedFromAlarm(alarm);
+                const alarmRecord = getAlarmRecord(alarm);
+                const isDone = Boolean(alarmRecord);
                 const isMissed = isMissedAlarm(alarm);
 
                 return (
@@ -973,23 +1168,37 @@ export default function RecordsScreen() {
                     />
 
                     <View style={styles.scheduleInnerSimple}>
-                      <Text
-                        style={[
-                          styles.scheduleTimeSimple,
-                          isDone && styles.scheduleTimeDone,
-                          isMissed && styles.scheduleTimeMissed,
-                        ]}
-                      >
-                        {formatAlarmDisplayTime(alarm)}{" "}
-                        {isDone ? "완료" : isMissed ? "미지급" : "예정"}
-                      </Text>
+                      <View style={styles.recordHeaderRow}>
+                        <Text
+                          style={[
+                            styles.scheduleTimeSimple,
+                            isMissed && styles.scheduleTimeMissed,
+                          ]}
+                        >
+                          {formatAlarmDisplayTime(alarm)}{" "}
+                          {isDone ? "완료" : isMissed ? "미지급" : "예정"}
+                          {isDone && alarmRecord
+                            ? ` (${normalizeRecordTime(alarmRecord.time)} 급여)`
+                            : ""}
+                        </Text>
+
+                        {isDone && (
+                          <View style={styles.recordSourceBadgeRight}>
+                            <Text style={styles.recordSourceBadgeText}>
+                              IoT
+                            </Text>
+                          </View>
+                        )}
+                      </View>
 
                       <Text style={styles.scheduleFoodSimple}>
                         {alarm.foodName}
                       </Text>
 
                       <Text style={styles.scheduleSubSimple}>
-                        {alarm.amount}g / {alarm.feedingType}식사
+                        {isDone && alarmRecord
+                          ? `${alarm.feedingType}식사 / 급여량 ${alarmRecord.amount}, 섭취량 ${alarmRecord.eatenAmount ?? alarmRecord.amount}`
+                          : `${alarm.amount}g / ${alarm.feedingType}식사`}
                       </Text>
                     </View>
 
@@ -1042,21 +1251,36 @@ export default function RecordsScreen() {
                   ) : null}
 
                   <View style={styles.scheduleInnerSimple}>
-                    <Text
-                      style={[
-                        styles.scheduleTimeSimple,
-                        styles.scheduleTimeDone,
-                      ]}
-                    >
-                      {normalizeRecordTime(record.time)} 완료
-                    </Text>
+                    <View style={styles.recordHeaderRow}>
+                      <Text style={styles.scheduleTimeSimple}>
+                        {normalizeRecordTime(record.time)} 완료 (
+                        {normalizeRecordTime(record.time)} 급여)
+                      </Text>
+
+                      <View
+                        style={[
+                          styles.recordSourceBadgeRight,
+                          styles.recordSourceBadgeManual,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.recordSourceBadgeText,
+                            styles.recordSourceBadgeManualText,
+                          ]}
+                        >
+                          수동
+                        </Text>
+                      </View>
+                    </View>
 
                     <Text style={styles.scheduleFoodSimple}>
                       {record.foodName}
                     </Text>
 
                     <Text style={styles.scheduleSubSimple}>
-                      {record.amount} / {record.feedingType}식사
+                      {record.feedingType}식사 / 급여량 {record.amount}, 섭취량{" "}
+                      {record.eatenAmount ?? "측정 안 됨"}
                     </Text>
                   </View>
                 </TouchableOpacity>
@@ -1165,6 +1389,30 @@ export default function RecordsScreen() {
 
                   <TouchableOpacity
                     onPress={handleIncreaseAmount}
+                    activeOpacity={0.8}
+                    style={styles.recordAmountIconButton}
+                  >
+                    <Ionicons name="add-circle" size={20} color="#2F6B57" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.recordAmountBox}>
+                <Text style={styles.recordAmountLabel}>섭취량</Text>
+
+                <View style={styles.recordAmountControl}>
+                  <TouchableOpacity
+                    onPress={handleDecreaseEatenAmount}
+                    activeOpacity={0.8}
+                    style={styles.recordAmountIconButton}
+                  >
+                    <Ionicons name="remove-circle" size={20} color="#2F6B57" />
+                  </TouchableOpacity>
+
+                  <Text style={styles.recordAmountValue}>{eatenAmount}g</Text>
+
+                  <TouchableOpacity
+                    onPress={handleIncreaseEatenAmount}
                     activeOpacity={0.8}
                     style={styles.recordAmountIconButton}
                   >
@@ -1710,6 +1958,151 @@ const styles = StyleSheet.create({
     marginRight: 2,
   },
 
+  todaySummaryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "#E6E6E6",
+  },
+  todaySummaryTitle: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#2F2F2F",
+    marginBottom: 12,
+  },
+  summaryTopRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginBottom: 14,
+  },
+  summaryMiniBox: {
+    flex: 1,
+    backgroundColor: "#F4F4EF",
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  summaryMiniLabel: {
+    fontSize: 11,
+    fontFamily: "Nanum",
+    color: "#6F6F6F",
+    marginBottom: 4,
+  },
+  summaryMiniValue: {
+    fontSize: 22,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+  summaryMiniValueBlue: {
+    color: "#3A7BD5",
+  },
+  summaryMiniSub: {
+    fontSize: 10,
+    fontFamily: "Nanum",
+    color: "#8A8A8A",
+    marginTop: 2,
+  },
+  progressWrap: {
+    marginBottom: 10,
+  },
+  progressTextRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 5,
+  },
+  progressLabel: {
+    fontSize: 11,
+    fontFamily: "Nanum",
+    color: "#6F6F6F",
+  },
+  progressValue: {
+    fontSize: 11,
+    fontFamily: "NanumB",
+    color: "#2F2F2F",
+  },
+  progressValueBlue: {
+    color: "#3A7BD5",
+  },
+  progressBarBg: {
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#E4E4E4",
+    overflow: "hidden",
+  },
+  progressBarFill: {
+    height: "100%",
+    borderRadius: 4,
+    backgroundColor: "#2F6B57",
+  },
+  progressBarFillBlue: {
+    height: "100%",
+    borderRadius: 4,
+    backgroundColor: "#3A7BD5",
+  },
+  summaryResultRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 4,
+  },
+  summaryResultLabel: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#555555",
+  },
+  summaryResultValue: {
+    fontSize: 12,
+    fontFamily: "NanumB",
+    color: "#D06B33",
+  },
+  detailStatsCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 22,
+    borderWidth: 1,
+    borderColor: "#E6E6E6",
+  },
+  detailStatsTitle: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#2F2F2F",
+    marginBottom: 10,
+  },
+  statRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEEEEE",
+  },
+  statRowLast: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingTop: 8,
+  },
+  statLabel: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#6F6F6F",
+  },
+  statValue: {
+    fontSize: 12,
+    fontFamily: "NanumB",
+    color: "#2F2F2F",
+  },
+  statTargetText: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#9A9A9A",
+  },
+  statMissedValue: {
+    fontSize: 12,
+    fontFamily: "NanumB",
+    color: "#D14A3A",
+  },
+
   recordSectionHeader: {
     marginTop: 4,
     marginBottom: 12,
@@ -1750,13 +2143,15 @@ const styles = StyleSheet.create({
   scheduleInnerSimple: {
     flex: 1,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingTop: 18,
+    paddingBottom: 18,
     justifyContent: "center",
+    position: "relative",
   },
   scheduleTimeSimple: {
-    fontSize: 11,
-    fontFamily: "Nanum",
-    color: "#7A7A7A",
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
     marginBottom: 4,
   },
   scheduleTimeDone: {
@@ -1784,6 +2179,34 @@ const styles = StyleSheet.create({
     fontFamily: "NanumB",
     color: "#2F6B57",
     marginRight: 2,
+  },
+
+  recordSourceBadge: {
+    position: "absolute",
+    top: 10,
+    left: 14,
+    alignSelf: "flex-start",
+    backgroundColor: "#EAF3EF",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  recordSourceBadgeText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+  recordSourceBadgeManual: {
+    backgroundColor: "#F4F1EA",
+  },
+  recordSourceBadgeManualText: {
+    color: "#8A6A3D",
+  },
+  recordAmountDetailText: {
+    fontSize: 11,
+    fontFamily: "Nanum",
+    color: "#8A8A8A",
+    marginTop: 3,
   },
 
   recordCheckCircle: {
@@ -1894,7 +2317,7 @@ const styles = StyleSheet.create({
   },
 
   bottomSheet: {
-    height: 352,
+    height: 406,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -2256,5 +2679,20 @@ const styles = StyleSheet.create({
 
   foodCheckIcon: {
     marginLeft: 4,
+  },
+  recordHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 8,
+    marginBottom: 2,
+  },
+
+  recordSourceBadgeRight: {
+    backgroundColor: "#EAF3EF",
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: "flex-start",
   },
 });
