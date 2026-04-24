@@ -34,7 +34,7 @@ type LoggedInUser = {
 const getGenderValue = (gender?: string) => {
   if (gender?.includes("남")) return "M";
   if (gender?.includes("여")) return "F";
-  return "N";
+  return "U";
 };
 
 export default function ProfileCompleteScreen() {
