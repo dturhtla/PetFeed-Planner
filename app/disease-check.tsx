@@ -6,10 +6,15 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const show = (msg: string) => {
+  ToastAndroid.show(msg, ToastAndroid.SHORT);
+};
 
 type GenderType = "남" | "여" | "중성화" | "";
 type PetType = "강아지" | "고양이" | "";
@@ -169,6 +174,8 @@ export default function DiseaseCheckScreen() {
 
       if (params?.from === "profile") {
         await AsyncStorage.setItem(draftKey, JSON.stringify(finalProfile));
+
+        show("질병 정보가 수정되었습니다.");
 
         router.replace({
           pathname: "/profile",

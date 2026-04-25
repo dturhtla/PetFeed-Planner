@@ -25,6 +25,7 @@ export default function LoginScreen() {
   const [id, setId] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const isFormValid = id.trim() && password.trim();
 
   const handleLogin = async () => {
     try {
@@ -96,6 +97,7 @@ export default function LoginScreen() {
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
               autoCapitalize="none"
+              onSubmitEditing={handleLogin}
             />
             <TouchableOpacity
               onPress={() => setShowPassword((prev) => !prev)}
@@ -109,7 +111,11 @@ export default function LoginScreen() {
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
+          <TouchableOpacity
+            style={[styles.loginButton, !isFormValid && styles.buttonDisabled]}
+            onPress={handleLogin}
+            disabled={!isFormValid}
+          >
             <Text style={styles.loginButtonText}>로그인</Text>
           </TouchableOpacity>
 
@@ -222,5 +228,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: "Nanum",
     textDecorationLine: "underline",
+  },
+  buttonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

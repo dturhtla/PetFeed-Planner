@@ -84,6 +84,12 @@ export default function FindPasswordScreen() {
   const [showNewPasswordConfirm, setShowNewPasswordConfirm] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
 
+  const isFormValid =
+    id.trim() &&
+    isValidEmail(email.trim()) &&
+    !validateNewPassword(newPassword) &&
+    !validateNewPasswordConfirm(newPassword, newPasswordConfirm);
+
   const handleIdChange = (text: string) => {
     setId(text);
 
@@ -234,7 +240,10 @@ export default function FindPasswordScreen() {
       }
 
       if (users[targetIndex].password === newPassword) {
-        Alert.alert("비밀번호 찾기", "이전에 사용하던 비밀번호와 동일합니다.");
+        Alert.alert(
+          "비밀번호 찾기",
+          "이전에 사용하던 비밀번호입니다. 다른 비밀번호를 입력해주세요.",
+        );
         return;
       }
 
@@ -353,7 +362,11 @@ export default function FindPasswordScreen() {
             <Text style={styles.errorText}>{errors.newPasswordConfirm}</Text>
           ) : null}
 
-          <TouchableOpacity style={styles.button} onPress={handleResetPassword}>
+          <TouchableOpacity
+            style={[styles.button, !isFormValid && styles.buttonDisabled]}
+            onPress={handleResetPassword}
+            disabled={!isFormValid}
+          >
             <Text style={styles.buttonText}>비밀번호 재설정</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -440,5 +453,8 @@ const styles = StyleSheet.create({
   },
   inputErrorBorder: {
     borderColor: "#D64545",
+  },
+  buttonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

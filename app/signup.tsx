@@ -155,6 +155,12 @@ export default function SignupScreen() {
     return undefined;
   };
 
+  const isFormValid =
+    !validateIdInput(id) &&
+    !validateEmailInput(email) &&
+    !validatePasswordInput(password) &&
+    !validatePasswordConfirmInput(password, passwordConfirm);
+
   const handleIdChange = (text: string) => {
     const filtered = text.replace(/[^a-zA-Z0-9]/g, "");
     setId(filtered);
@@ -412,7 +418,11 @@ export default function SignupScreen() {
             <Text style={styles.errorText}>{errors.passwordConfirm}</Text>
           ) : null}
 
-          <TouchableOpacity style={styles.button} onPress={handleSignup}>
+          <TouchableOpacity
+            style={[styles.button, !isFormValid && styles.buttonDisabled]}
+            onPress={handleSignup}
+            disabled={!isFormValid}
+          >
             <Text style={styles.buttonText}>회원가입 완료</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -496,5 +506,8 @@ const styles = StyleSheet.create({
   },
   inputErrorBorder: {
     borderColor: "#D64545",
+  },
+  buttonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

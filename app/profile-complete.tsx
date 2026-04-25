@@ -37,8 +37,13 @@ const getGenderValue = (gender?: string) => {
   return "U";
 };
 
+const show = (msg: string) => {
+  ToastAndroid.show(msg, ToastAndroid.SHORT);
+};
+
 export default function ProfileCompleteScreen() {
   const [profiles, setProfiles] = useState<ProfileData[]>([]);
+  const isFormValid = profiles.length > 0;
 
   const loadProfiles = useCallback(async () => {
     try {
@@ -115,6 +120,8 @@ export default function ProfileCompleteScreen() {
 
       const email = parsedUser.email;
 
+      let isAllSuccess = true;
+
       for (const profile of profiles) {
         const petData = {
           user_id: Number(parsedUser.id) || 1,
@@ -135,32 +142,34 @@ export default function ProfileCompleteScreen() {
           body: JSON.stringify(petData),
         });
 
-        const data = await response.json();
+        const responseText = await response.text();
+        console.log("pets response status:", response.status);
+        console.log("pets response text:", responseText);
 
         if (!response.ok) {
-          console.log("반려동물 등록 실패:", data);
-          ToastAndroid.show("반려동물 등록에 실패했습니다", ToastAndroid.SHORT);
-          return;
+          show("반려동물 등록에 실패했습니다");
+          isAllSuccess = false;
+          break;
         }
 
+        const data = responseText ? JSON.parse(responseText) : null;
         console.log("반려동물 등록 성공:", data);
       }
 
-      await AsyncStorage.setItem(`profileCompleted_${email}`, "true");
-      await AsyncStorage.removeItem(`petProfileFlowMode_${email}`);
+      if (isAllSuccess) {
+        await AsyncStorage.setItem(`profileCompleted_${email}`, "true");
+        await AsyncStorage.removeItem(`petProfileFlowMode_${email}`);
 
-      const completedValue = await AsyncStorage.getItem(
-        `profileCompleted_${email}`,
-      );
-      console.log("profile-complete completedValue:", completedValue);
+        show("프로필이 저장되었습니다");
 
-      ToastAndroid.show("프로필이 저장되었습니다", ToastAndroid.SHORT);
-
-      router.dismissAll();
-      router.replace("/home" as any);
+        setTimeout(() => {
+          router.dismissAll();
+          router.replace("/home");
+        }, 500);
+      }
     } catch (error) {
       console.log("profile-complete handleSaveProfile error:", error);
-      ToastAndroid.show("서버 연결 오류가 발생했습니다", ToastAndroid.SHORT);
+      show("서버 연결 오류가 발생했습니다");
     }
   };
 
@@ -206,7 +215,11 @@ export default function ProfileCompleteScreen() {
           <Text style={styles.addButtonText}>⊕ 프로필 추가하기</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.doneButton} onPress={handleSaveProfile}>
+        <TouchableOpacity
+          style={[styles.doneButton, !isFormValid && styles.buttonDisabled]}
+          onPress={handleSaveProfile}
+          disabled={!isFormValid}
+        >
           <Text style={styles.doneButtonText}>프로필 저장</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -292,5 +305,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: "NanumB",
     color: "#FFFFFF",
+  },
+  buttonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });
