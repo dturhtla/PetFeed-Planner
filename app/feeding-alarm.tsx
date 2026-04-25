@@ -17,9 +17,11 @@ import {
   Switch,
   Text,
   TextInput,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
+
 import {
   SafeAreaView,
   useSafeAreaInsets,
@@ -60,6 +62,10 @@ Notifications.setNotificationHandler({
     shouldSetBadge: false,
   }),
 });
+
+const show = (msg: string) => {
+  ToastAndroid.show(msg, ToastAndroid.SHORT);
+};
 
 const PERIOD_OPTIONS = ["오전", "오후"] as const;
 const HOUR_OPTIONS = Array.from({ length: 12 }, (_, i) =>
@@ -571,7 +577,7 @@ export default function FeedingAlarmScreen() {
   };
 
   const handleDecreaseAmount = () => {
-    setAmount((prev) => Math.max(0, prev - 5));
+    setAmount((prev) => Math.max(5, prev - 5));
   };
 
   const handleIncreaseAmount = () => {
@@ -697,6 +703,8 @@ export default function FeedingAlarmScreen() {
         JSON.stringify(updatedFoods),
       );
 
+      show("사료가 추가되었습니다.");
+
       setIsAddFoodFormVisible(false);
       setNewFoodName("");
       setNewFoodGram("");
@@ -725,6 +733,8 @@ export default function FeedingAlarmScreen() {
         getFoodsKey(userEmail),
         JSON.stringify(updatedFoods),
       );
+
+      show("사료 목록에서 삭제되었습니다.");
     } catch (error) {
       console.log("handleDeleteFood error: ", error);
     }
@@ -741,7 +751,7 @@ export default function FeedingAlarmScreen() {
       return;
     }
 
-    if (!selectedFood?.name) {
+    if (!selectedFood || selectedFood.id === "temp") {
       Alert.alert("알림", "사료를 입력해주세요.");
       return;
     }
@@ -775,8 +785,10 @@ export default function FeedingAlarmScreen() {
       setAlarms((prev) =>
         prev.map((alarm) => (alarm.id === editingAlarmId ? payload : alarm)),
       );
+      show("알람이 수정되었습니다.");
     } else {
       setAlarms((prev) => [...prev, payload]);
+      show("급여 알람이 등록되었습니다.");
     }
 
     closeForm();
@@ -837,6 +849,9 @@ export default function FeedingAlarmScreen() {
     setAlarms((prev) =>
       prev.filter((alarm) => !selectedAlarmIds.includes(alarm.id)),
     );
+
+    show("알람이 삭제되었습니다.");
+
     setSelectedAlarmIds([]);
     setIsDeleteMode(false);
   };
@@ -1175,9 +1190,21 @@ export default function FeedingAlarmScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.saveButton}
-          activeOpacity={0.9}
+          style={[
+            styles.saveButton,
+            (!selectedFood ||
+              selectedFood.id === "temp" ||
+              amount <= 0 ||
+              selectedDays.length === 0) &&
+              styles.saveButtonDisabled,
+          ]}
           onPress={handleSaveAlarm}
+          disabled={
+            !selectedFood ||
+            selectedFood.id === "temp" ||
+            amount <= 0 ||
+            selectedDays.length === 0
+          }
         >
           <Text style={styles.saveButtonText}>저장</Text>
         </TouchableOpacity>
@@ -1952,5 +1979,8 @@ const styles = StyleSheet.create({
   foodDeleteButton: {
     marginLeft: 8,
     padding: 2,
+  },
+  saveButtonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

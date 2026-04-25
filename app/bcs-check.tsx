@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StyleSheet,
@@ -89,6 +90,7 @@ export default function BcsCheckScreen() {
   const [selectedBcs, setSelectedBcs] = useState<BcsLabel | "">("");
   const [userEmail, setUserEmail] = useState("");
   const [flowMode, setFlowMode] = useState<ProfileEntryMode>(initialParamMode);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -167,6 +169,8 @@ export default function BcsCheckScreen() {
         return;
       }
 
+      setIsSaving(true);
+
       const draftKey = `petProfileDraft_${userEmail}`;
       const profileKey = `petProfile_${userEmail}`;
       const flowModeKey = `petProfileFlowMode_${userEmail}`;
@@ -214,8 +218,6 @@ export default function BcsCheckScreen() {
       await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
       await AsyncStorage.setItem(flowModeKey, flowMode);
 
-      console.log("BCS flowMode:", flowMode);
-
       router.push({
         pathname: "/disease-check",
         params: {
@@ -225,6 +227,8 @@ export default function BcsCheckScreen() {
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "BCS 저장 중 오류가 발생했습니다.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -258,8 +262,19 @@ export default function BcsCheckScreen() {
           );
         })}
 
-        <TouchableOpacity style={styles.nextButton} onPress={handleNext}>
-          <Text style={styles.nextButtonText}>NEXT</Text>
+        <TouchableOpacity
+          style={[
+            styles.nextButton,
+            (!selectedBcs || isSaving) && styles.nextButtonDisabled,
+          ]}
+          onPress={handleNext}
+          disabled={!selectedBcs || isSaving}
+        >
+          {isSaving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.nextButtonText}>NEXT</Text>
+          )}
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -327,5 +342,8 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 22,
     fontFamily: "Nanum",
+  },
+  nextButtonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

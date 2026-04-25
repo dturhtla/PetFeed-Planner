@@ -6,6 +6,7 @@ import DateTimePicker, {
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useMemo, useState } from "react";
 import {
+  Alert,
   Modal,
   PanResponder,
   Platform,
@@ -14,6 +15,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -165,6 +167,10 @@ function getGramNumber(value?: string | number) {
   if (value === undefined || value === null) return 0;
   return Number(String(value).replace(/[^0-9.]/g, "")) || 0;
 }
+
+const show = (msg: string) => {
+  ToastAndroid.show(msg, ToastAndroid.SHORT);
+};
 
 export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
@@ -639,11 +645,70 @@ export default function RecordsScreen() {
     isFedFromAlarm,
   ]);
 
+  const isRecordFormValid =
+    !!selectedFood?.name &&
+    amount.trim() !== "" &&
+    !isNaN(Number(amount)) &&
+    Number(amount) > 0 &&
+    Number(amount) <= 1000 &&
+    eatenAmount.trim() !== "" &&
+    !isNaN(Number(eatenAmount)) &&
+    Number(eatenAmount) >= 0 &&
+    Number(eatenAmount) <= Number(amount);
+
   const handleSaveRecord = async () => {
-    if (!userEmail || !selectedPetId) return;
-    if (!selectedFood) return;
-    if (!amount.trim()) return;
-    if (!eatenAmount.trim()) return;
+    if (!selectedFood || !selectedFood.name) {
+      Alert.alert("알림", "사료를 선택해주세요.");
+      return;
+    }
+
+    // 2. 급여량 입력 확인
+    if (!amount.trim()) {
+      Alert.alert("알림", "급여량을 입력해주세요.");
+      return;
+    }
+
+    // 3. 숫자인지 확인
+    if (isNaN(Number(amount))) {
+      Alert.alert("알림", "급여량은 숫자만 입력해주세요.");
+      return;
+    }
+
+    // 4. 0 이하 값 방지
+    if (Number(amount) <= 0) {
+      Alert.alert("알림", "급여량은 0보다 커야 합니다.");
+      return;
+    }
+
+    // 5. 비정상적으로 큰 값 방지 (선택)
+    if (Number(amount) > 1000) {
+      Alert.alert("알림", "급여량이 너무 많습니다.");
+      return;
+    }
+
+    // 6. 먹은량 입력 확인
+    if (!eatenAmount.trim()) {
+      Alert.alert("알림", "섭취량을 입력해주세요.");
+      return;
+    }
+
+    // 7. 먹은량 숫자인지 확인
+    if (isNaN(Number(eatenAmount))) {
+      Alert.alert("알림", "섭취량은 숫자만 입력해주세요.");
+      return;
+    }
+
+    // 8. 먹은량 음수 방지
+    if (Number(eatenAmount) < 0) {
+      Alert.alert("알림", "섭취량은 0 이상이어야 합니다.");
+      return;
+    }
+
+    // 9. 먹은량 > 급여량 방지
+    if (Number(eatenAmount) > Number(amount)) {
+      Alert.alert("알림", "섭취량은 급여량보다 클 수 없습니다.");
+      return;
+    }
 
     try {
       const newRecord: FeedingRecord = {
@@ -668,6 +733,8 @@ export default function RecordsScreen() {
         JSON.stringify(updatedRecords),
       );
 
+      show("급여 기록이 저장되었습니다.");
+
       closeAddModal();
     } catch (error) {
       console.log("handleSaveRecord error: ", error);
@@ -688,6 +755,8 @@ export default function RecordsScreen() {
         getRecordsKey(userEmail),
         JSON.stringify(updatedRecords),
       );
+
+      show("급여 기록이 삭제되었습니다.");
 
       exitDeleteMode();
     } catch (error) {
@@ -710,7 +779,7 @@ export default function RecordsScreen() {
 
   const handleDecreaseAmount = () => {
     const current = Number(amount || "0");
-    const next = Math.max(0, current - 5);
+    const next = Math.max(5, current - 5);
     setAmount(String(next));
   };
 
@@ -792,6 +861,8 @@ export default function RecordsScreen() {
         JSON.stringify(updatedFoods),
       );
 
+      show("사료가 추가되었습니다.");
+
       setIsAddFoodFormVisible(false);
       setNewFoodName("");
       setNewFoodGram("");
@@ -821,6 +892,8 @@ export default function RecordsScreen() {
         getFoodsKey(userEmail),
         JSON.stringify(updatedFoods),
       );
+
+      show("사료 목록에서 삭제되었습니다.");
     } catch (error) {
       console.log("handleDeleteFood error: ", error);
     }
@@ -1470,11 +1543,22 @@ export default function RecordsScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  style={styles.recordSaveButton}
+                  style={[
+                    styles.recordSaveButton,
+                    !isRecordFormValid && styles.recordSaveButtonDisabled,
+                  ]}
                   onPress={handleSaveRecord}
                   activeOpacity={0.85}
+                  disabled={!isRecordFormValid}
                 >
-                  <Text style={styles.recordSaveButtonText}>저장</Text>
+                  <Text
+                    style={[
+                      styles.recordSaveButtonText,
+                      !isRecordFormValid && styles.recordSaveButtonTextDisabled,
+                    ]}
+                  >
+                    저장
+                  </Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2694,5 +2778,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     alignSelf: "flex-start",
+  },
+  recordSaveButtonDisabled: {
+    backgroundColor: "#C9C9C9",
+  },
+
+  recordSaveButtonTextDisabled: {
+    color: "#FFFFFF",
   },
 });

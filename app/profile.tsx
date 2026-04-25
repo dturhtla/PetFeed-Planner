@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -46,6 +47,10 @@ type FieldErrors = {
   petType?: string;
   bcs?: string;
   diseases?: string;
+};
+
+const show = (msg: string) => {
+  ToastAndroid.show(msg, ToastAndroid.SHORT);
 };
 
 const FIRST_BOX_HEIGHT = 64;
@@ -616,6 +621,8 @@ export default function ProfileScreen() {
       setIsFirstInputMode(false);
       setSelectedProfileIndex(null);
       setErrors({});
+
+      show("프로필이 저장되었습니다.");
     } catch (error) {
       console.log(error);
     }
@@ -650,6 +657,9 @@ export default function ProfileScreen() {
             setIsFirstInputMode(true);
             setIsEditMode(false);
             setSelectedProfileIndex(null);
+
+            show("프로필이 삭제되었습니다.");
+
             return;
           }
 
@@ -662,6 +672,8 @@ export default function ProfileScreen() {
           setIsEditMode(false);
           setSelectedProfileIndex(null);
           setErrors({});
+
+          show("프로필이 삭제되었습니다.");
         },
       },
     ]);

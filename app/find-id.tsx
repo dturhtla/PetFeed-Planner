@@ -28,6 +28,9 @@ export default function FindIdScreen() {
   const router = useRouter();
   const [email, setEmail] = useState("");
 
+  const trimmedEmail = email.trim().toLowerCase();
+  const isFormValid = isValidEmail(trimmedEmail);
+
   const handleFindId = async () => {
     try {
       const trimmedEmail = email.trim().toLowerCase();
@@ -84,7 +87,11 @@ export default function FindIdScreen() {
           autoCapitalize="none"
         />
 
-        <TouchableOpacity style={styles.button} onPress={handleFindId}>
+        <TouchableOpacity
+          style={[styles.button, !isFormValid && styles.buttonDisabled]}
+          onPress={handleFindId}
+          disabled={!isFormValid}
+        >
           <Text style={styles.buttonText}>아이디 찾기</Text>
         </TouchableOpacity>
       </KeyboardAvoidingView>
@@ -132,5 +139,8 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 20,
     fontFamily: "NanumB",
+  },
+  buttonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

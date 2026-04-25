@@ -34,8 +34,12 @@ type PetProfile = {
 export default function DeleteAccountScreen() {
   const router = useRouter();
   const [password, setPassword] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const executeDelete = async () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+
     try {
       const savedLoggedInUser = await AsyncStorage.getItem("loggedInUser");
 
@@ -100,6 +104,8 @@ export default function DeleteAccountScreen() {
     } catch (error) {
       console.log(error);
       Alert.alert("오류", "탈퇴 처리 중 문제가 발생했습니다.");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -187,8 +193,12 @@ export default function DeleteAccountScreen() {
           />
 
           <TouchableOpacity
-            style={styles.deleteButton}
+            style={[
+              styles.deleteButton,
+              !password.trim() && styles.deleteButtonDisabled,
+            ]}
             onPress={handleDeleteAccount}
+            disabled={!password.trim() || isDeleting}
           >
             <Text style={styles.deleteButtonText}>탈퇴하기</Text>
           </TouchableOpacity>
@@ -272,5 +282,8 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 18,
     fontFamily: "NanumB",
+  },
+  deleteButtonDisabled: {
+    backgroundColor: "#C9C9C9",
   },
 });

@@ -40,6 +40,9 @@ export default function RootLayout() {
       <Stack.Screen name="analysis-result" />
       <Stack.Screen name="chatbot" />
       <Stack.Screen name="records" />
+      <Stack.Screen name="feeding-alarm" />
+      <Stack.Screen name="profile-complete" />
+      <Stack.Screen name="disease-check" />
       <Stack.Screen name="settings" />
       <Stack.Screen name="delete-account" />
       <Stack.Screen name="modal" />

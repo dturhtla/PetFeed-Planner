@@ -7,20 +7,27 @@ import { SafeAreaView } from "react-native-safe-area-context";
 export default function SettingsScreen() {
   const router = useRouter();
 
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem("loggedInUser");
+  const handleLogout = () => {
+    Alert.alert("로그아웃", "정말 로그아웃하시겠습니까?", [
+      {
+        text: "취소",
+        style: "cancel",
+      },
+      {
+        text: "로그아웃",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await AsyncStorage.removeItem("loggedInUser");
 
-      Alert.alert("로그아웃", "로그아웃 되었습니다.", [
-        {
-          text: "확인",
-          onPress: () => router.replace("/" as any),
+            router.replace("/" as any); // 바로 이동
+          } catch (error) {
+            console.log(error);
+            Alert.alert("오류", "로그아웃 중 문제가 발생했습니다.");
+          }
         },
-      ]);
-    } catch (error) {
-      console.log(error);
-      Alert.alert("오류", "로그아웃 중 문제가 발생했습니다.");
-    }
+      },
+    ]);
   };
 
   return (
