@@ -4,9 +4,10 @@ import DateTimePicker, {
   DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  FlatList,
   Modal,
   PanResponder,
   Platform,
@@ -175,6 +176,9 @@ const show = (msg: string) => {
 export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
 
+  const petListRef = useRef<FlatList<PetProfileItem>>(null);
+  const [isPetSheetVisible, setIsPetSheetVisible] = useState(false);
+
   const [userEmail, setUserEmail] = useState("");
   const [petProfiles, setPetProfiles] = useState<PetProfileItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<string>("");
@@ -218,6 +222,8 @@ export default function RecordsScreen() {
   const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
 
   const getRecordsKey = (email: string) => `feedingRecords_${email}`;
+
+  const getSelectedPetKey = (email: string) => `selectedPetId_${email}`;
 
   const formatDate = () => {
     const now = new Date();
@@ -345,7 +351,7 @@ export default function RecordsScreen() {
 
         if (Array.isArray(parsedMulti)) {
           loadedProfiles = parsedMulti.map((item: any, index: number) => ({
-            id: String(item.id ?? index + 1),
+            id: String(index),
             name: item.name || `반려동물${index + 1}`,
             petType: item.petType || "",
           }));
@@ -356,7 +362,7 @@ export default function RecordsScreen() {
 
         loadedProfiles = [
           {
-            id: "1",
+            id: "0",
             name: parsedSingle.name || "반려동물",
             petType: parsedSingle.petType || "",
           },
@@ -375,12 +381,23 @@ export default function RecordsScreen() {
 
       setPetProfiles(loadedProfiles);
 
-      setSelectedPetId((prev) => {
-        if (prev && loadedProfiles.some((pet) => pet.id === prev)) {
-          return prev;
+      const savedSelectedPetId = await AsyncStorage.getItem(
+        getSelectedPetKey(email),
+      );
+
+      if (
+        savedSelectedPetId &&
+        loadedProfiles.some((pet) => pet.id === savedSelectedPetId)
+      ) {
+        setSelectedPetId(savedSelectedPetId);
+      } else {
+        const firstPetId = loadedProfiles[0]?.id || "";
+        setSelectedPetId(firstPetId);
+
+        if (firstPetId) {
+          await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
         }
-        return loadedProfiles[0]?.id || "";
-      });
+      }
 
       if (savedRecords) {
         const parsedRecords = JSON.parse(savedRecords);
@@ -921,6 +938,46 @@ export default function RecordsScreen() {
     setIsAddModalVisible(true);
   };
 
+  const openPetSheet = () => {
+    if (petProfiles.length <= 1) return;
+
+    setIsPetSheetVisible(true);
+
+    setTimeout(() => {
+      const index = petProfiles.findIndex((pet) => pet.id === selectedPetId);
+
+      if (index >= 0) {
+        petListRef.current?.scrollToIndex({
+          index,
+          animated: true,
+          viewPosition: 0.5,
+        });
+      }
+    }, 200);
+  };
+
+  const handleSelectPet = async (pet: PetProfileItem) => {
+    try {
+      if (!userEmail) return;
+
+      setSelectedPetId(pet.id);
+      await AsyncStorage.setItem(getSelectedPetKey(userEmail), pet.id);
+
+      setIsPetSheetVisible(false);
+      ToastAndroid.show(`${pet.name}으로 변경되었습니다`, ToastAndroid.SHORT);
+    } catch (error) {
+      console.log(error);
+    }
+  };
+
+  const renderPetIcon = (petType?: string, size = 18) => {
+    if (petType === "고양이") {
+      return <Ionicons name="logo-octocat" size={size} color="#111" />;
+    }
+
+    return <Ionicons name="paw" size={size} color="#111" />;
+  };
+
   const handlePressAddButton = () => {
     resetAddForm();
     setIsFromAlarm(false);
@@ -944,59 +1001,31 @@ export default function RecordsScreen() {
           <Ionicons name="chevron-back" size={24} color="#2F6B57" />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>급여기록</Text>
+        <TouchableOpacity
+          style={styles.headerPetDropdown}
+          activeOpacity={petProfiles.length <= 1 ? 1 : 0.75}
+          onPress={openPetSheet}
+        >
+          <View style={styles.headerPetIconCircle}>
+            {renderPetIcon(selectedPet?.petType, 18)}
+          </View>
+
+          <Text style={styles.headerTitle}>
+            {selectedPet?.name ?? "반려동물"}의 급여기록
+          </Text>
+
+          <Ionicons
+            name="caret-down"
+            size={16}
+            color={petProfiles.length <= 1 ? "#B8C7C0" : "#2F6B57"}
+          />
+        </TouchableOpacity>
 
         <View style={styles.headerPlaceholder} />
       </View>
 
       <View style={styles.line} />
-
-      <ScrollView
-        contentContainerStyle={styles.container}
-        showsVerticalScrollIndicator={false}
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.profileRow}
-        >
-          {petProfiles.map((pet) => {
-            const isSelected = pet.id === selectedPetId;
-
-            return (
-              <TouchableOpacity
-                key={pet.id}
-                style={styles.profileWrap}
-                onPress={() => setSelectedPetId(pet.id)}
-                activeOpacity={0.8}
-              >
-                <View
-                  style={[
-                    styles.profileCircle,
-                    isSelected && styles.profileCircleSelected,
-                  ]}
-                >
-                  <Ionicons
-                    name={pet.petType === "강아지" ? "paw" : "logo-octocat"}
-                    size={24}
-                    color="#111111"
-                  />
-                </View>
-
-                <Text
-                  style={[
-                    styles.profileName,
-                    isSelected && styles.profileNameSelected,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {pet.name}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
+      <ScrollView contentContainerStyle={styles.container}>
         {!hasAnyEnabledAlarm || !previewAlarm ? (
           <TouchableOpacity
             style={styles.noticeBox}
@@ -1863,6 +1892,70 @@ export default function RecordsScreen() {
           </Modal>
         )}
       </Modal>
+      <Modal
+        visible={isPetSheetVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsPetSheetVisible(false)}
+      >
+        <Pressable
+          style={styles.petModalOverlay}
+          onPress={() => setIsPetSheetVisible(false)}
+        >
+          <Pressable style={styles.petSheet}>
+            <Text style={styles.petSheetTitle}>반려동물 선택</Text>
+
+            <FlatList
+              ref={petListRef}
+              data={petProfiles}
+              keyExtractor={(item) => item.id}
+              style={styles.petList}
+              showsVerticalScrollIndicator={false}
+              getItemLayout={(_, index) => ({
+                length: 52,
+                offset: 52 * index,
+                index,
+              })}
+              onScrollToIndexFailed={() => {}}
+              renderItem={({ item }) => {
+                const isSelected = item.id === selectedPetId;
+
+                return (
+                  <TouchableOpacity
+                    style={[
+                      styles.petItem,
+                      isSelected && styles.selectedPetItem,
+                    ]}
+                    activeOpacity={0.85}
+                    onPress={() => handleSelectPet(item)}
+                  >
+                    <View style={styles.petIconCircle}>
+                      {renderPetIcon(item.petType, 20)}
+                    </View>
+
+                    <Text
+                      style={[
+                        styles.petItemText,
+                        isSelected && styles.selectedPetText,
+                      ]}
+                    >
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              }}
+            />
+
+            <TouchableOpacity
+              style={styles.petSheetCloseButton}
+              activeOpacity={0.9}
+              onPress={() => setIsPetSheetVisible(false)}
+            >
+              <Text style={styles.petSheetCloseButtonText}>닫기</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1887,8 +1980,23 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontFamily: "Nanum",
+    fontFamily: "NanumB",
     color: "#2F6B57",
+  },
+  headerPetDropdown: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    flex: 1,
+  },
+  headerPetIconCircle: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerPlaceholder: {
     width: 24,
@@ -2785,5 +2893,81 @@ const styles = StyleSheet.create({
 
   recordSaveButtonTextDisabled: {
     color: "#FFFFFF",
+  },
+
+  petModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.22)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  petSheet: {
+    width: "82%",
+    maxHeight: "70%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+  },
+
+  petSheetTitle: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    textAlign: "center",
+    marginBottom: 12,
+  },
+  petList: {
+    maxHeight: 170,
+  },
+
+  petItem: {
+    height: 52,
+    borderRadius: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    gap: 12,
+  },
+
+  selectedPetItem: {
+    backgroundColor: "#E4F5E8",
+  },
+
+  petIconCircle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  petItemText: {
+    fontSize: 14,
+    fontFamily: "Nanum",
+    color: "#111",
+  },
+
+  selectedPetText: {
+    fontFamily: "NanumB",
+    color: "#111",
+  },
+
+  petSheetCloseButton: {
+    height: 44,
+    backgroundColor: "#2F6B57",
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 8,
+  },
+
+  petSheetCloseButtonText: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontFamily: "NanumB",
   },
 });
