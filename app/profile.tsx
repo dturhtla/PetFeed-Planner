@@ -66,6 +66,9 @@ const MONTH_OPTIONS = [
 export default function ProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const fromHome = params?.from === "home";
+  const fromHomeAdd = params?.from === "homeAdd";
+  const fromHomeManage = params?.from === "homeManage";
 
   const forceInputMode = params?.forceInput === "true";
 
@@ -382,6 +385,15 @@ export default function ProfileScreen() {
 
       setProfiles(parsedProfiles);
 
+      if (fromHomeManage && parsedProfiles.length > 0) {
+        setProfileEntryMode("signup");
+        setIsFirstInputMode(false);
+        setIsEditMode(false);
+        setSelectedProfileIndex(null);
+        setErrors({});
+        return;
+      }
+
       if (forceInputMode || parsedProfiles.length === 0) {
         const nextMode: ProfileEntryMode =
           forceInputMode && requestedEntryMode === "add" ? "add" : "signup";
@@ -435,6 +447,7 @@ export default function ProfileScreen() {
   }, [
     applyProfileData,
     forceInputMode,
+    fromHomeManage,
     requestedEntryMode,
     returnedEditIndex,
     returnedFromBcsEdit,
@@ -459,6 +472,11 @@ export default function ProfileScreen() {
         }
 
         if (isEditMode || isFirstInputMode) {
+          if (fromHomeAdd && profileEntryMode === "add") {
+            router.replace("/home" as any);
+            return true;
+          }
+
           setIsEditMode(false);
           setIsFirstInputMode(false);
           setSelectedProfileIndex(null);
@@ -476,7 +494,14 @@ export default function ProfileScreen() {
       );
 
       return () => subscription.remove();
-    }, [router, isEditMode, isFirstInputMode, openPicker]),
+    }, [
+      router,
+      isEditMode,
+      isFirstInputMode,
+      openPicker,
+      fromHomeAdd,
+      profileEntryMode,
+    ]),
   );
 
   const handleNextToBcs = async () => {
@@ -1069,12 +1094,22 @@ export default function ProfileScreen() {
         <TouchableOpacity
           style={styles.backButton}
           onPress={() => {
+            if (
+              (isEditMode || isFirstInputMode) &&
+              fromHome &&
+              profileEntryMode === "add"
+            ) {
+              router.replace("/home" as any);
+              return;
+            }
+
             if (isEditMode) {
               setIsEditMode(false);
               setSelectedProfileIndex(null);
               setErrors({});
               return;
             }
+
             router.replace("/home" as any);
           }}
         >
