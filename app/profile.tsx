@@ -70,6 +70,8 @@ export default function ProfileScreen() {
   const fromHomeAdd = params?.from === "homeAdd";
   const fromHomeManage = params?.from === "homeManage";
 
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
   const forceInputMode = params?.forceInput === "true";
 
   const requestedEntryMode = useMemo<ProfileEntryMode>(() => {
@@ -471,16 +473,17 @@ export default function ProfileScreen() {
           return true;
         }
 
-        if (isEditMode || isFirstInputMode) {
-          if (fromHomeAdd && profileEntryMode === "add") {
-            router.replace("/home" as any);
-            return true;
-          }
+        if (fromHomeAdd && profileEntryMode === "add") {
+          router.replace("/home" as any);
+          return true;
+        }
 
+        if (isEditMode || isFirstInputMode) {
           setIsEditMode(false);
           setIsFirstInputMode(false);
           setSelectedProfileIndex(null);
           setErrors({});
+          resetForm();
           return true;
         }
 
@@ -546,10 +549,12 @@ export default function ProfileScreen() {
         pathname: "/bcs-check",
         params: {
           from: "profile",
+          returnTo: "profileEdit",
           selectedBcs: bcs,
           petType,
           editIndex:
             selectedProfileIndex !== null ? String(selectedProfileIndex) : "",
+          petName: name,
         },
       } as any);
     } catch (error) {
@@ -579,6 +584,7 @@ export default function ProfileScreen() {
           pathname: "/disease-check",
           params: {
             from: "profile",
+            returnTo: "profileEdit",
             selectedDiseases: JSON.stringify(diseases),
             editIndex: String(selectedProfileIndex),
           },
@@ -587,9 +593,10 @@ export default function ProfileScreen() {
       }
 
       router.push({
-        pathname: "/disease-check",
         params: {
-          mode: profileEntryMode,
+          mode: "edit",
+          from: "profile",
+          returnTo: "profileEdit",
           selectedDiseases: JSON.stringify(diseases),
         },
       } as any);
@@ -599,6 +606,8 @@ export default function ProfileScreen() {
   };
 
   const handleSave = async () => {
+    if (isSavingProfile) return;
+
     try {
       if (!userEmail) {
         router.replace("/" as any);
@@ -650,6 +659,8 @@ export default function ProfileScreen() {
       show("프로필이 저장되었습니다.");
     } catch (error) {
       console.log(error);
+    } finally {
+      setIsSavingProfile(false);
     }
   };
 
@@ -1113,7 +1124,7 @@ export default function ProfileScreen() {
             router.replace("/home" as any);
           }}
         >
-          <Ionicons name="chevron-back" size={24} color="#2F6B57" />
+          <Ionicons name="chevron-back" size={28} color="#2F6B57" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>
@@ -1353,6 +1364,7 @@ export default function ProfileScreen() {
           <TouchableOpacity
             style={styles.singleSaveButton}
             onPress={handleSave}
+            disabled={isSavingProfile}
           >
             <Text style={styles.singleSaveButtonText}>저장</Text>
           </TouchableOpacity>
@@ -1487,20 +1499,22 @@ const styles = StyleSheet.create({
   },
 
   header: {
+    height: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 10,
   },
   backButton: {
-    width: 24,
+    width: 36,
+    height: 36,
+    justifyContent: "center",
     alignItems: "flex-start",
+    marginTop: -2,
   },
   headerTitle: {
-    fontSize: 18,
-    fontFamily: "Nanum",
+    fontSize: 20,
+    fontFamily: "NanumB",
     color: "#2F6B57",
   },
   deleteHeaderButton: {
@@ -1516,6 +1530,7 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#777",
     opacity: 0.5,
+    marginTop: -4,
   },
 
   listContainer: {

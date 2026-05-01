@@ -1,7 +1,7 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
-import { router, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -83,6 +83,28 @@ const FEEDING_TYPE_OPTIONS = [
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
+const formatDaysLabel = (days: string[]) => {
+  if (days.length === 0) return "반복 없음";
+
+  const sortedDays = [...days].sort(
+    (a, b) => DAYS.indexOf(a) - DAYS.indexOf(b),
+  );
+
+  const isEveryday = DAYS.every((day) => sortedDays.includes(day));
+  const isWeekday =
+    ["월", "화", "수", "목", "금"].every((day) => sortedDays.includes(day)) &&
+    sortedDays.length === 5;
+  const isWeekend =
+    ["토", "일"].every((day) => sortedDays.includes(day)) &&
+    sortedDays.length === 2;
+
+  if (isEveryday) return "매일";
+  if (isWeekday) return "평일";
+  if (isWeekend) return "주말";
+
+  return sortedDays.join(", ");
+};
+
 const ITEM_HEIGHT = 34;
 const WHEEL_VISIBLE_ROWS = 3;
 const LOOP_REPEAT = 7;
@@ -150,12 +172,16 @@ async function ensureAndroidChannel() {
 async function clearFeedingAlarmNotifications() {
   const scheduled = await Notifications.getAllScheduledNotificationsAsync();
 
-  const feedingOnly = scheduled.filter(
-    (item) => item.content.data?.kind === "feeding-alarm",
-  );
+  for (const item of scheduled) {
+    const data = item.content.data;
 
-  for (const item of feedingOnly) {
-    await Notifications.cancelScheduledNotificationAsync(item.identifier);
+    if (
+      data?.kind === "feeding-alarm" ||
+      data?.alarmId ||
+      item.content.title === "급여 알림"
+    ) {
+      await Notifications.cancelScheduledNotificationAsync(item.identifier);
+    }
   }
 }
 
@@ -200,6 +226,14 @@ async function syncFeedingAlarmNotifications(alarms: AlarmItem[]) {
   }
 }
 
+async function cleanupGhostFeedingNotifications() {
+  try {
+    await clearFeedingAlarmNotifications();
+  } catch (error) {
+    console.log("cleanupGhostFeedingNotifications error:", error);
+  }
+}
+
 function buildLoopedData(base: string[]) {
   return Array.from({ length: LOOP_REPEAT }, () => base).flat();
 }
@@ -210,26 +244,6 @@ const LOOPED_MINUTES = buildLoopedData(MINUTE_OPTIONS);
 function getMiddleIndex(base: string[], value: string) {
   const baseIndex = Math.max(0, base.indexOf(value));
   return Math.floor(LOOP_REPEAT / 2) * base.length + baseIndex;
-}
-
-function getDayLabel(days: string[]) {
-  if (days.length === 0) return "반복 없음";
-  if (days.length === 7) return "매일";
-
-  const weekday = ["월", "화", "수", "목", "금"];
-  const weekend = ["토", "일"];
-
-  const isWeekday = weekday.every((d) => days.includes(d)) && days.length === 5;
-  const isWeekend = weekend.every((d) => days.includes(d)) && days.length === 2;
-
-  if (isWeekday) return "평일";
-  if (isWeekend) return "주말";
-
-  const sortedDays = [...days].sort(
-    (a, b) => DAYS.indexOf(a) - DAYS.indexOf(b),
-  );
-
-  return sortedDays.join(" / ");
 }
 
 function formatDisplayTime(period: string, hour: string, minute: string) {
@@ -330,6 +344,8 @@ function EditableTimeWheel({
 }
 
 export default function FeedingAlarmScreen() {
+  const router = useRouter();
+
   const insets = useSafeAreaInsets();
   const { petId, petName } = useLocalSearchParams<{
     petId?: string;
@@ -344,6 +360,11 @@ export default function FeedingAlarmScreen() {
 
   const [alarms, setAlarms] = useState<AlarmItem[]>([]);
   const [isFormVisible, setIsFormVisible] = useState(false);
+
+  const [isSavingAlarm, setIsSavingAlarm] = useState(false);
+  const [isDeletingAlarm, setIsDeletingAlarm] = useState(false);
+  const [isSavingFood, setIsSavingFood] = useState(false);
+  const [isDeletingFood, setIsDeletingFood] = useState(false);
 
   const sortedAlarms = useMemo(() => {
     return [...alarms].sort((a, b) => {
@@ -530,6 +551,10 @@ export default function FeedingAlarmScreen() {
     editingTimeField,
   ]);
 
+  useEffect(() => {
+    cleanupGhostFeedingNotifications();
+  }, []);
+
   const resetForm = () => {
     setSelectedPeriod("오후");
     setSelectedHour("05");
@@ -673,6 +698,7 @@ export default function FeedingAlarmScreen() {
   };
 
   const handleAddNewFood = async () => {
+    if (isSavingFood) return;
     if (!userEmail) return;
 
     const trimmedName = newFoodName.trim();
@@ -683,15 +709,17 @@ export default function FeedingAlarmScreen() {
     const gramOnly = trimmedGram.replace(/[^0-9]/g, "");
     if (!gramOnly) return;
 
-    const newItem: FoodItem = {
-      id: `custom-${Date.now()}`,
-      name: trimmedName,
-      subLabel: `${gramOnly}g`,
-      gramLabel: `${gramOnly}g`,
-      isCustom: true,
-    };
-
     try {
+      setIsSavingFood(true);
+
+      const newItem: FoodItem = {
+        id: `custom-${Date.now()}`,
+        name: trimmedName,
+        subLabel: `${gramOnly}g`,
+        gramLabel: `${gramOnly}g`,
+        isCustom: true,
+      };
+
       const updatedFoods = [newItem, ...foodLibrary];
 
       setFoodLibrary(updatedFoods);
@@ -709,14 +737,23 @@ export default function FeedingAlarmScreen() {
       setNewFoodName("");
       setNewFoodGram("");
     } catch (error) {
-      console.log("handleAddNewFood error: ", error);
+      console.log("handleAddNewFood error:", error);
+      Alert.alert(
+        "추가 실패",
+        "사료를 추가하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsSavingFood(false);
     }
   };
 
   const handleDeleteFood = async (foodId: string) => {
+    if (isDeletingFood) return;
     if (!userEmail) return;
 
     try {
+      setIsDeletingFood(true);
+
       const updatedFoods = foodLibrary.filter((item) => item.id !== foodId);
 
       setFoodLibrary(updatedFoods);
@@ -736,11 +773,19 @@ export default function FeedingAlarmScreen() {
 
       show("사료 목록에서 삭제되었습니다.");
     } catch (error) {
-      console.log("handleDeleteFood error: ", error);
+      console.log("handleDeleteFood error:", error);
+      Alert.alert(
+        "삭제 실패",
+        "사료를 삭제하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsDeletingFood(false);
     }
   };
 
   const handleSaveAlarm = () => {
+    if (isSavingAlarm) return;
+
     if (!selectedPeriod || !selectedHour || !selectedMinute) {
       Alert.alert("알림", "급여 시간을 설정해주세요.");
       return;
@@ -766,32 +811,44 @@ export default function FeedingAlarmScreen() {
       return;
     }
 
-    const payload: AlarmItem = {
-      id: editingAlarmId ?? `${Date.now()}`,
-      period: selectedPeriod,
-      hour: selectedHour,
-      minute: selectedMinute,
-      feedingType: selectedFeedingType,
-      foodName: selectedFood.name,
-      foodSubLabel: selectedFood.subLabel,
-      amount,
-      days: selectedDays,
-      enabled: editingAlarmId
-        ? (alarms.find((item) => item.id === editingAlarmId)?.enabled ?? true)
-        : true,
-    };
+    try {
+      setIsSavingAlarm(true);
 
-    if (editingAlarmId) {
-      setAlarms((prev) =>
-        prev.map((alarm) => (alarm.id === editingAlarmId ? payload : alarm)),
+      const payload: AlarmItem = {
+        id: editingAlarmId ?? `${Date.now()}`,
+        period: selectedPeriod,
+        hour: selectedHour,
+        minute: selectedMinute,
+        feedingType: selectedFeedingType,
+        foodName: selectedFood.name,
+        foodSubLabel: selectedFood.subLabel,
+        amount,
+        days: selectedDays,
+        enabled: editingAlarmId
+          ? (alarms.find((item) => item.id === editingAlarmId)?.enabled ?? true)
+          : true,
+      };
+
+      if (editingAlarmId) {
+        setAlarms((prev) =>
+          prev.map((alarm) => (alarm.id === editingAlarmId ? payload : alarm)),
+        );
+        show("알람이 수정되었습니다.");
+      } else {
+        setAlarms((prev) => [...prev, payload]);
+        show("급여 알람이 등록되었습니다.");
+      }
+
+      closeForm();
+    } catch (error) {
+      console.log("handleSaveAlarm error:", error);
+      Alert.alert(
+        "저장 실패",
+        "알람을 저장하는 중 문제가 발생했어요. 다시 시도해주세요.",
       );
-      show("알람이 수정되었습니다.");
-    } else {
-      setAlarms((prev) => [...prev, payload]);
-      show("급여 알람이 등록되었습니다.");
+    } finally {
+      setIsSavingAlarm(false);
     }
-
-    closeForm();
   };
 
   const toggleAlarmEnabled = (id: string) => {
@@ -844,16 +901,29 @@ export default function FeedingAlarmScreen() {
   };
 
   const handleDeleteSelectedAlarms = () => {
+    if (isDeletingAlarm) return;
     if (selectedAlarmIds.length === 0) return;
 
-    setAlarms((prev) =>
-      prev.filter((alarm) => !selectedAlarmIds.includes(alarm.id)),
-    );
+    try {
+      setIsDeletingAlarm(true);
 
-    show("알람이 삭제되었습니다.");
+      setAlarms((prev) =>
+        prev.filter((alarm) => !selectedAlarmIds.includes(alarm.id)),
+      );
 
-    setSelectedAlarmIds([]);
-    setIsDeleteMode(false);
+      show("알람이 삭제되었습니다.");
+
+      setSelectedAlarmIds([]);
+      setIsDeleteMode(false);
+    } catch (error) {
+      console.log("handleDeleteSelectedAlarms error:", error);
+      Alert.alert(
+        "삭제 실패",
+        "알람을 삭제하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsDeletingAlarm(false);
+    }
   };
 
   const renderEmptyState = () => (
@@ -891,7 +961,10 @@ export default function FeedingAlarmScreen() {
               }
               handleEditAlarm(alarm);
             }}
-            onLongPress={() => enterDeleteMode(alarm.id)}
+            onLongPress={() => {
+              if (isDeletingAlarm) return;
+              enterDeleteMode(alarm.id);
+            }}
             style={[
               styles.alarmCard,
               !alarm.enabled && styles.alarmCardDisabled,
@@ -929,7 +1002,7 @@ export default function FeedingAlarmScreen() {
                     !alarm.enabled && styles.alarmMetaDisabled,
                   ]}
                 >
-                  {alarm.feedingType} {getDayLabel(alarm.days)}
+                  {alarm.feedingType} {formatDaysLabel(alarm.days)}
                 </Text>
                 <Text
                   style={[
@@ -982,7 +1055,7 @@ export default function FeedingAlarmScreen() {
             ]}
             activeOpacity={0.85}
             onPress={handleDeleteSelectedAlarms}
-            disabled={selectedAlarmIds.length === 0}
+            disabled={selectedAlarmIds.length === 0 || isDeletingAlarm}
           >
             <Ionicons name="trash-outline" size={18} color="#FFFFFF" />
             <Text style={styles.deleteButtonText}>삭제</Text>
@@ -1199,12 +1272,7 @@ export default function FeedingAlarmScreen() {
               styles.saveButtonDisabled,
           ]}
           onPress={handleSaveAlarm}
-          disabled={
-            !selectedFood ||
-            selectedFood.id === "temp" ||
-            amount <= 0 ||
-            selectedDays.length === 0
-          }
+          disabled={isSavingAlarm}
         >
           <Text style={styles.saveButtonText}>저장</Text>
         </TouchableOpacity>
@@ -1215,6 +1283,10 @@ export default function FeedingAlarmScreen() {
   const shouldShowForm = isFormVisible;
   const hasAlarms = alarms.length > 0;
 
+  const handleGoBack = () => {
+    router.back();
+  };
+
   if (!isLoaded) {
     return <SafeAreaView style={styles.safe} />;
   }
@@ -1222,35 +1294,20 @@ export default function FeedingAlarmScreen() {
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => {
-            if (isDeleteMode) {
-              exitDeleteMode();
-              return;
-            }
-
-            if (isFormVisible) {
-              closeForm();
-              return;
-            }
-
-            router.back();
-          }}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="chevron-back" size={24} color="#2F6B57" />
-        </TouchableOpacity>
-
-        <Text style={styles.headerTitle}>
-          {petName && typeof petName === "string" ? `${petName} 알람` : "알람"}
-        </Text>
-
-        <View style={styles.headerRight}>
-          <View style={styles.headerPlaceholder} />
+        <View style={styles.headerSide}>
+          <TouchableOpacity onPress={handleGoBack}>
+            <Ionicons name="chevron-back" size={28} color="#2F6B57" />
+          </TouchableOpacity>
         </View>
-      </View>
 
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>
+            {petName ? `${petName} 알람` : "급여 알람"}
+          </Text>
+        </View>
+
+        <View style={styles.headerSide} />
+      </View>
       <View style={styles.line} />
 
       {shouldShowForm
@@ -1376,8 +1433,8 @@ export default function FeedingAlarmScreen() {
 
                     <TouchableOpacity
                       style={styles.addFoodSaveButton}
-                      activeOpacity={0.85}
                       onPress={handleAddNewFood}
+                      disabled={isSavingFood}
                     >
                       <Text style={styles.addFoodSaveButtonText}>추가</Text>
                     </TouchableOpacity>
@@ -1408,27 +1465,33 @@ const styles = StyleSheet.create({
 
   header: {
     height: 52,
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F6F7F4",
-    position: "relative",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
   },
   backButton: {
-    position: "absolute",
-    left: 18,
-    top: 14,
-    zIndex: 1,
+    width: 36,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    marginTop: -2,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontFamily: "NanumB",
     color: "#2F6B57",
     textAlign: "center",
   },
-  headerRight: {
-    position: "absolute",
-    right: 18,
-    top: 14,
+  headerSide: {
+    width: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerPlaceholder: {
     width: 24,
@@ -1438,6 +1501,7 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#777",
     opacity: 0.5,
+    marginTop: -4,
   },
 
   emptyStateWrap: {
