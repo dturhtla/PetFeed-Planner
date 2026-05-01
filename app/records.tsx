@@ -114,6 +114,26 @@ function matchesDay(alarm: AlarmItem, dayKor: string) {
   return alarm.days.includes(dayKor);
 }
 
+function formatAlarmDays(days?: string[]) {
+  if (!days || days.length === 0) return "매일";
+
+  const orderedDays = DAYS.filter((day) => days.includes(day));
+
+  const isEveryday = orderedDays.length === 7;
+  const isWeekdays =
+    orderedDays.length === 5 &&
+    ["월", "화", "수", "목", "금"].every((day) => orderedDays.includes(day));
+  const isWeekend =
+    orderedDays.length === 2 &&
+    ["토", "일"].every((day) => orderedDays.includes(day));
+
+  if (isEveryday) return "매일";
+  if (isWeekdays) return "평일";
+  if (isWeekend) return "주말";
+
+  return orderedDays.join(" / ");
+}
+
 function getNearestUpcomingAlarm(alarms: AlarmItem[]) {
   const now = new Date();
   const enabledAlarms = alarms.filter((alarm) => alarm.enabled);
@@ -1143,9 +1163,7 @@ export default function RecordsScreen() {
                 <View style={styles.alarmPreviewTextWrap}>
                   <Text style={styles.alarmPreviewMeta}>
                     {previewAlarm.feedingType}{" "}
-                    {previewAlarm.days?.length
-                      ? previewAlarm.days.join(" / ")
-                      : "매일"}
+                    {formatAlarmDays(previewAlarm.days)}
                   </Text>
                   <Text style={styles.alarmPreviewFood}>
                     {previewAlarm.foodName} {previewAlarm.amount}g
@@ -1280,6 +1298,21 @@ export default function RecordsScreen() {
 
         <View style={styles.recordSectionHeader}>
           <Text style={styles.recordSectionTitle}>기록 내역</Text>
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() =>
+              router.push({
+                pathname: "/feeding-history",
+                params: {
+                  petId: selectedPetId,
+                  petName: selectedPet?.name ?? "",
+                },
+              })
+            }
+          >
+            <Text style={styles.recordDetailLink}>자세히 보기 &gt;</Text>
+          </TouchableOpacity>
         </View>
 
         {combinedTimelineItems.length === 0 ? (
@@ -1349,7 +1382,7 @@ export default function RecordsScreen() {
                       <Text style={styles.scheduleSubSimple}>
                         {isDone && alarmRecord
                           ? `${alarm.feedingType}식사 / 급여량 ${alarmRecord.amount}, 섭취량 ${alarmRecord.eatenAmount ?? alarmRecord.amount}`
-                          : `${alarm.amount}g / ${alarm.feedingType}식사`}
+                          : `${alarm.feedingType}식사 / ${alarm.amount}g`}
                       </Text>
                     </View>
 
@@ -2346,11 +2379,19 @@ const styles = StyleSheet.create({
   recordSectionHeader: {
     marginTop: 4,
     marginBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   recordSectionTitle: {
     fontSize: 16,
     fontFamily: "NanumB",
     color: "#2F2F2F",
+  },
+  recordDetailLink: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#E04B4B",
   },
 
   scheduleList: {

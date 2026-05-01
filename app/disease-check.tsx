@@ -349,7 +349,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 20, // 추가
   },
-
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
