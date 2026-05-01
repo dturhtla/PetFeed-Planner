@@ -1,13 +1,16 @@
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -82,6 +85,9 @@ export default function BcsCheckScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
+  const petName = typeof params?.petName === "string" ? params.petName : "";
+  const isProfileEdit = params?.returnTo === "profileEdit";
+
   const initialParamMode = useMemo<ProfileEntryMode>(() => {
     return params?.mode === "add" ? "add" : "signup";
   }, [params?.mode]);
@@ -153,8 +159,38 @@ export default function BcsCheckScreen() {
   }, [params?.petType, params?.selectedBcs, params?.mode, router]);
 
   const list = petType === "고양이" ? catBcsList : dogBcsList;
-  const title =
-    petType === "고양이" ? "고양이 비만도 체크" : "강아지 비만도 체크";
+
+  const handleBack = useCallback(() => {
+    if (isProfileEdit) {
+      router.replace({
+        pathname: "/profile",
+        params: {
+          fromBcsEdit: "true",
+          selectedBcs:
+            typeof params?.selectedBcs === "string" ? params.selectedBcs : "",
+          editIndex:
+            typeof params?.editIndex === "string" ? params.editIndex : "",
+        },
+      } as any);
+      return;
+    }
+
+    router.replace("/profile" as any);
+  }, [isProfileEdit, params?.selectedBcs, params?.editIndex, router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        () => {
+          handleBack();
+          return true;
+        },
+      );
+
+      return () => subscription.remove();
+    }, [handleBack]),
+  );
 
   const handleNext = async () => {
     if (!selectedBcs) {
@@ -234,9 +270,42 @@ export default function BcsCheckScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.logo}>PetFeed Planner</Text>
-        <Text style={styles.title}>{title}</Text>
+      {isProfileEdit ? (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+              <Ionicons name="chevron-back" size={28} color="#2F6B57" />
+            </TouchableOpacity>
+
+            <Text style={styles.headerTitle}>
+              {petName ? `${petName}의 비만도 체크` : "비만도 체크"}
+            </Text>
+          </View>
+
+          <View style={styles.line} />
+        </>
+      ) : null}
+
+      <ScrollView
+        contentContainerStyle={[
+          styles.container,
+          isProfileEdit && styles.editContainer,
+        ]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {!isProfileEdit ? (
+          <>
+            <Text style={styles.logo}>PetFeed Planner</Text>
+
+            <Text style={styles.title}>
+              {petType === "고양이"
+                ? "고양이 비만도 체크"
+                : "강아지 비만도 체크"}
+            </Text>
+          </>
+        ) : null}
+
         <Text style={styles.guideText}>
           *반려동물의 몸을 육안으로 확인하시고 직접 만져보시고 선택해주세요*
         </Text>
@@ -273,7 +342,9 @@ export default function BcsCheckScreen() {
           {isSaving ? (
             <ActivityIndicator size="small" color="#FFFFFF" />
           ) : (
-            <Text style={styles.nextButtonText}>NEXT</Text>
+            <Text style={styles.nextButtonText}>
+              {isProfileEdit ? "저장" : "DONE"}
+            </Text>
           )}
         </TouchableOpacity>
       </ScrollView>
@@ -286,10 +357,43 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#F6F7F4",
   },
-  container: {
-    padding: 16,
-    paddingBottom: 32,
+
+  header: {
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
   },
+  backButton: {
+    position: "absolute",
+    left: 18,
+    width: 36,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    marginTop: -2,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+  line: {
+    height: 1,
+    backgroundColor: "#777",
+    opacity: 0.5,
+    marginTop: -4,
+  },
+
+  container: {
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 36,
+  },
+  editContainer: {
+    paddingTop: 24,
+  },
+
   logo: {
     fontSize: 28,
     fontFamily: "KCC",
@@ -299,17 +403,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   title: {
-    fontSize: 22,
+    fontSize: 28,
     fontFamily: "NanumB",
     color: "#2F6B57",
-    marginBottom: 8,
+    marginBottom: 12,
   },
   guideText: {
     fontSize: 14,
     fontFamily: "Nanum",
-    color: "#f00",
+    color: "#FF0000",
     marginBottom: 14,
   },
+
   bcsCard: {
     borderWidth: 1.5,
     borderColor: "#2F6B57",
@@ -330,6 +435,7 @@ const styles = StyleSheet.create({
   selectedText: {
     color: "#FFFFFF",
   },
+
   nextButton: {
     height: 54,
     backgroundColor: "#1F5F43",
@@ -338,12 +444,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginTop: 6,
   },
-  nextButtonText: {
-    color: "#FFF",
-    fontSize: 22,
-    fontFamily: "Nanum",
-  },
   nextButtonDisabled: {
     backgroundColor: "#C9C9C9",
+  },
+  nextButtonText: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontFamily: "Nanum",
   },
 });

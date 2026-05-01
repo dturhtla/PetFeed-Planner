@@ -35,6 +35,8 @@ export default function HomeScreen() {
   const lastBackPress = useRef(0);
   const listRef = useRef<FlatList<Pet>>(null);
 
+  const [isNavigating, setIsNavigating] = useState(false);
+
   const [pets, setPets] = useState<Pet[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<string | null>(null);
   const [petSheetVisible, setPetSheetVisible] = useState(false);
@@ -121,6 +123,17 @@ export default function HomeScreen() {
     }, [loadSelectedPet]),
   );
 
+  const moveTo = (route: string) => {
+    if (isNavigating) return;
+
+    setIsNavigating(true);
+    router.push(route as any);
+
+    setTimeout(() => {
+      setIsNavigating(false);
+    }, 500);
+  };
+
   const openPetSheet = () => {
     setPetSheetVisible(true);
 
@@ -160,7 +173,7 @@ export default function HomeScreen() {
       <View style={styles.container}>
         <TouchableOpacity
           style={styles.settingButton}
-          onPress={() => router.push("/settings" as any)}
+          onPress={() => moveTo("/settings")}
         >
           <Ionicons name="settings-outline" size={24} color="#2F6B57" />
         </TouchableOpacity>
@@ -186,7 +199,7 @@ export default function HomeScreen() {
             <TouchableOpacity
               key={item.title}
               style={styles.menuButton}
-              onPress={() => router.push(item.route as any)}
+              onPress={() => moveTo(item.route)}
             >
               <Ionicons name={item.icon as any} size={20} color="#76A89A" />
               <Text style={styles.menuText}>{item.title}</Text>

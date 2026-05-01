@@ -37,7 +37,7 @@ export default function SettingsScreen() {
           style={styles.backButton}
           onPress={() => router.back()}
         >
-          <Ionicons name="chevron-back" size={24} color="#2F6B57" />
+          <Ionicons name="chevron-back" size={28} color="#2F6B57" />
         </TouchableOpacity>
 
         <Text style={styles.headerTitle}>설정</Text>
@@ -71,26 +71,29 @@ const styles = StyleSheet.create({
     backgroundColor: "#F6F7F4",
   },
   header: {
+    height: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 10,
   },
   backButton: {
-    width: 24,
+    width: 36,
+    height: 36,
+    justifyContent: "center",
     alignItems: "flex-start",
+    marginTop: -2,
   },
   headerTitle: {
-    fontSize: 18,
-    fontFamily: "Nanum",
+    fontSize: 20,
+    fontFamily: "NanumB",
     color: "#2F6B57",
   },
   line: {
     height: 1,
     backgroundColor: "#777",
     opacity: 0.5,
+    marginTop: -4,
   },
   container: {
     flex: 1,

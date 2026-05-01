@@ -221,6 +221,11 @@ export default function RecordsScreen() {
 
   const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
 
+  const [isSavingRecord, setIsSavingRecord] = useState(false);
+  const [isDeletingRecord, setIsDeletingRecord] = useState(false);
+  const [isSavingFood, setIsSavingFood] = useState(false);
+  const [isDeletingFood, setIsDeletingFood] = useState(false);
+
   const getRecordsKey = (email: string) => `feedingRecords_${email}`;
 
   const getSelectedPetKey = (email: string) => `selectedPetId_${email}`;
@@ -674,6 +679,8 @@ export default function RecordsScreen() {
     Number(eatenAmount) <= Number(amount);
 
   const handleSaveRecord = async () => {
+    if (isSavingRecord) return;
+
     if (!selectedFood || !selectedFood.name) {
       Alert.alert("알림", "사료를 선택해주세요.");
       return;
@@ -727,6 +734,8 @@ export default function RecordsScreen() {
       return;
     }
 
+    setIsSavingRecord(true);
+
     try {
       const newRecord: FeedingRecord = {
         id: `${Date.now()}`,
@@ -755,13 +764,23 @@ export default function RecordsScreen() {
       closeAddModal();
     } catch (error) {
       console.log("handleSaveRecord error: ", error);
+      Alert.alert(
+        "저장 실패",
+        "급여 기록을 저장하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsSavingRecord(false);
     }
   };
 
   const handleDeleteSelectedManualRecords = async () => {
+    if (isDeletingRecord) return;
+
     if (!userEmail || selectedManualRecordIds.length === 0) return;
 
     try {
+      setIsDeletingRecord(true);
+
       const updatedRecords = records.filter(
         (record) => !selectedManualRecordIds.includes(record.id),
       );
@@ -778,6 +797,12 @@ export default function RecordsScreen() {
       exitDeleteMode();
     } catch (error) {
       console.log("handleDeleteSelectedManualRecords error: ", error);
+      Alert.alert(
+        "삭제 실패",
+        "급여 기록을 삭제하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsDeletingRecord(false);
     }
   };
 
@@ -850,6 +875,8 @@ export default function RecordsScreen() {
   };
 
   const handleAddNewFood = async () => {
+    if (isSavingFood) return;
+
     if (!userEmail) return;
 
     const trimmedName = newFoodName.trim();
@@ -861,6 +888,8 @@ export default function RecordsScreen() {
     if (!gramOnly) return;
 
     try {
+      setIsSavingFood(true);
+
       const newItem: FoodItem = {
         id: `custom-${Date.now()}`,
         name: trimmedName,
@@ -885,13 +914,23 @@ export default function RecordsScreen() {
       setNewFoodGram("");
     } catch (error) {
       console.log("handleAddNewFood error: ", error);
+      Alert.alert(
+        "추가 실패",
+        "사료를 추가하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsSavingFood(false);
     }
   };
 
   const handleDeleteFood = async (foodId: string) => {
+    if (isDeletingFood) return;
+
     if (!userEmail) return;
 
     try {
+      setIsDeletingFood(true);
+
       const updatedFoods = foodLibrary.filter((item) => item.id !== foodId);
 
       setFoodLibrary(updatedFoods);
@@ -913,6 +952,12 @@ export default function RecordsScreen() {
       show("사료 목록에서 삭제되었습니다.");
     } catch (error) {
       console.log("handleDeleteFood error: ", error);
+      Alert.alert(
+        "삭제 실패",
+        "사료를 삭제하는 중 문제가 발생했어요. 다시 시도해주세요.",
+      );
+    } finally {
+      setIsDeletingFood(false);
     }
   };
 
@@ -998,7 +1043,7 @@ export default function RecordsScreen() {
             router.back();
           }}
         >
-          <Ionicons name="chevron-back" size={24} color="#2F6B57" />
+          <Ionicons name="chevron-back" size={28} color="#2F6B57" />
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -1025,7 +1070,11 @@ export default function RecordsScreen() {
       </View>
 
       <View style={styles.line} />
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {!hasAnyEnabledAlarm || !previewAlarm ? (
           <TouchableOpacity
             style={styles.noticeBox}
@@ -1417,7 +1466,7 @@ export default function RecordsScreen() {
             ]}
             activeOpacity={0.85}
             onPress={handleDeleteSelectedManualRecords}
-            disabled={selectedManualRecordIds.length === 0}
+            disabled={selectedManualRecordIds.length === 0 || isDeletingRecord}
           >
             <Text style={styles.deleteConfirmButtonText}>삭제</Text>
           </TouchableOpacity>
@@ -1574,20 +1623,14 @@ export default function RecordsScreen() {
                 <TouchableOpacity
                   style={[
                     styles.recordSaveButton,
-                    !isRecordFormValid && styles.recordSaveButtonDisabled,
+                    (!isRecordFormValid || isSavingRecord) &&
+                      styles.recordSaveButtonDisabled,
                   ]}
                   onPress={handleSaveRecord}
                   activeOpacity={0.85}
-                  disabled={!isRecordFormValid}
+                  disabled={!isRecordFormValid || isSavingRecord}
                 >
-                  <Text
-                    style={[
-                      styles.recordSaveButtonText,
-                      !isRecordFormValid && styles.recordSaveButtonTextDisabled,
-                    ]}
-                  >
-                    저장
-                  </Text>
+                  <Text style={styles.recordSaveButtonText}>저장</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1748,6 +1791,7 @@ export default function RecordsScreen() {
                             style={styles.addFoodSaveButton}
                             activeOpacity={0.85}
                             onPress={handleAddNewFood}
+                            disabled={isSavingFood}
                           >
                             <Text style={styles.addFoodSaveButtonText}>
                               추가
@@ -1818,6 +1862,7 @@ export default function RecordsScreen() {
                             style={styles.addFoodSaveButton}
                             activeOpacity={0.85}
                             onPress={handleAddNewFood}
+                            disabled={isSavingFood}
                           >
                             <Text style={styles.addFoodSaveButtonText}>
                               추가
@@ -1967,16 +2012,18 @@ const styles = StyleSheet.create({
   },
 
   header: {
+    height: 52,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 10,
   },
   backButton: {
-    width: 24,
+    width: 36,
+    height: 36,
+    justifyContent: "center",
     alignItems: "flex-start",
+    marginTop: -2,
   },
   headerTitle: {
     fontSize: 18,
@@ -2005,6 +2052,7 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#777",
     opacity: 0.5,
+    marginTop: -4,
   },
 
   container: {

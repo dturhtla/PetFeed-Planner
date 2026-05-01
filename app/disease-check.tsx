@@ -1,8 +1,10 @@
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { router, useLocalSearchParams } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
+  BackHandler,
   ScrollView,
   StyleSheet,
   Text,
@@ -50,7 +52,17 @@ const DISEASE_OPTIONS = [
 ];
 
 export default function DiseaseCheckScreen() {
-  const params = useLocalSearchParams();
+  const router = useRouter();
+
+  const params = useLocalSearchParams<{
+    mode?: string;
+    from?: string;
+    returnTo?: string;
+    selectedDiseases?: string;
+    editIndex?: string;
+  }>();
+
+  const isProfileEdit = params?.returnTo === "profileEdit";
 
   const [flowMode, setFlowMode] = useState<ProfileEntryMode>("signup");
 
@@ -96,6 +108,40 @@ export default function DiseaseCheckScreen() {
 
     loadFlowMode();
   }, [params?.mode]);
+
+  const handleBack = useCallback(() => {
+    if (params?.returnTo === "profileEdit") {
+      router.replace({
+        pathname: "/profile",
+        params: {
+          fromDiseaseEdit: "true",
+          selectedDiseases:
+            typeof params?.selectedDiseases === "string"
+              ? params.selectedDiseases
+              : "[]",
+          editIndex:
+            typeof params?.editIndex === "string" ? params.editIndex : "",
+        },
+      } as any);
+      return;
+    }
+
+    router.replace("/profile" as any);
+  }, [params?.returnTo, params?.selectedDiseases, params?.editIndex, router]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener(
+        "hardwareBackPress",
+        () => {
+          handleBack();
+          return true;
+        },
+      );
+
+      return () => subscription.remove();
+    }, [handleBack]),
+  );
 
   const toggleDisease = (item: string) => {
     if (item === "없음") {
@@ -201,8 +247,6 @@ export default function DiseaseCheckScreen() {
       await AsyncStorage.setItem(profilesKey, JSON.stringify(updatedProfiles));
       await AsyncStorage.setItem(completedKey, "true");
 
-      console.log("Disease flowMode:", flowMode);
-
       if (flowMode === "signup") {
         await AsyncStorage.removeItem(flowModeKey);
         router.replace("/profile-complete" as any);
@@ -218,30 +262,52 @@ export default function DiseaseCheckScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>질병체크</Text>
+      {isProfileEdit ? (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+              <Ionicons name="chevron-back" size={28} color="#2F6B57" />
+            </TouchableOpacity>
 
-        <View style={styles.grid}>
-          {DISEASE_OPTIONS.map((item) => {
-            const isSelected = selectedDiseases.includes(item);
+            <Text style={styles.headerTitle}>질병체크</Text>
+          </View>
 
-            return (
-              <TouchableOpacity
-                key={item}
-                style={[
-                  styles.optionButton,
-                  isSelected && styles.selectedButton,
-                ]}
-                onPress={() => toggleDisease(item)}
-              >
-                <Text
-                  style={[styles.optionText, isSelected && styles.selectedText]}
+          <View style={styles.line} />
+        </>
+      ) : null}
+
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        {!isProfileEdit ? <Text style={styles.title}>질병체크</Text> : null}
+        <View style={styles.gridArea}>
+          <View style={styles.grid}>
+            {DISEASE_OPTIONS.map((item) => {
+              const isSelected = selectedDiseases.includes(item);
+
+              return (
+                <TouchableOpacity
+                  key={item}
+                  style={[
+                    styles.optionButton,
+                    isSelected && styles.selectedButton,
+                  ]}
+                  onPress={() => toggleDisease(item)}
                 >
-                  {item}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
+                  <Text
+                    style={[
+                      styles.optionText,
+                      isSelected && styles.selectedText,
+                    ]}
+                  >
+                    {item}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
         </View>
 
         <TouchableOpacity
@@ -267,17 +333,23 @@ const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
     paddingHorizontal: 24,
-    paddingTop: 100,
+    paddingTop: 0,
     paddingBottom: 36,
-    justifyContent: "space-between",
   },
   title: {
     fontSize: 28,
     fontFamily: "NanumB",
     color: "#2F6B57",
     textAlign: "center",
-    marginBottom: 36,
+    marginTop: 55, // 추가/증가
+    marginBottom: 120,
   },
+  gridArea: {
+    flex: 1,
+    justifyContent: "center",
+    marginTop: 20, // 추가
+  },
+
   grid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -324,5 +396,44 @@ const styles = StyleSheet.create({
     color: "#FFF",
     fontSize: 22,
     fontFamily: "Nanum",
+  },
+  header: {
+    height: 52,
+    justifyContent: "center",
+    alignItems: "center",
+    position: "relative",
+  },
+
+  headerSide: {
+    width: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  headerCenter: {
+    flex: 1,
+  },
+
+  headerTitle: {
+    fontSize: 20,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+
+  line: {
+    height: 1,
+    backgroundColor: "#777",
+    opacity: 0.5,
+    marginTop: -4,
+  },
+
+  backButton: {
+    position: "absolute",
+    left: 18,
+    width: 36,
+    height: 36,
+    justifyContent: "center",
+    alignItems: "flex-start",
+    marginTop: -2,
   },
 });
