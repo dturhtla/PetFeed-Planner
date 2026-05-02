@@ -29,12 +29,33 @@ type LoggedInUser = {
   id: string;
   email: string;
   password: string;
+  serverUserId?: number;
 };
 
 const getGenderValue = (gender?: string) => {
   if (gender?.includes("남")) return "M";
   if (gender?.includes("여")) return "F";
   return "U";
+};
+
+const diseaseMap: Record<string, string> = {
+  신장질환: "kidney_disease",
+  심장질환: "heart_disease",
+  당뇨: "diabetes",
+  췌장염: "pancreatitis",
+  관절염: "arthritis",
+  갑상선기능저하증: "hypothyroidism",
+  갑상선기능항진증: "hyperthyroidism",
+  비뇨기질환: "urinary_disease",
+  없음: "none",
+};
+
+const getHealthStatusValue = (diseases?: string[]) => {
+  if (!diseases || diseases.length === 0) return "none";
+
+  const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
+
+  return mapped[0] || "none";
 };
 
 const show = (msg: string) => {
@@ -122,14 +143,14 @@ export default function ProfileCompleteScreen() {
 
       let isAllSuccess = true;
 
-      if (!parsedUser?.id) {
+      if (!parsedUser?.serverUserId) {
         alert("로그인 정보가 없습니다. 다시 로그인해주세요.");
         return;
       }
 
       for (const profile of profiles) {
         const petData = {
-          user_id: Number(parsedUser.id),
+          user_id: Number(parsedUser.serverUserId),
           name: profile.name || "",
           age: Number(profile.age) || 0,
           species: profile.petType === "고양이" ? "Cat" : "Dog",
@@ -138,9 +159,7 @@ export default function ProfileCompleteScreen() {
           current_weight: Number(profile.weight) || 0,
           bcs: profile.bcs || "none",
           diseases: profile.diseases || [],
-          health_status: profile.diseases?.length
-            ? profile.diseases.join(", ")
-            : "none",
+          health_status: getHealthStatusValue(profile.diseases),
         };
 
         const response = await fetch(`${API_BASE_URL}/pets`, {
@@ -157,9 +176,9 @@ export default function ProfileCompleteScreen() {
         console.log("pets response text:", responseText);
 
         if (!response.ok) {
-          show("반려동물 등록에 실패했습니다");
+          show("일부 반려동물 등록 실패");
           isAllSuccess = false;
-          break;
+          continue;
         }
 
         const data = responseText ? JSON.parse(responseText) : null;

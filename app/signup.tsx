@@ -16,9 +16,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 type User = {
-  id: string;
+  id: string; // 로그인 아이디
   email: string;
   password: string;
+  serverUserId?: number; // 서버 DB user_id
 };
 
 type FieldErrors = {
@@ -27,6 +28,9 @@ type FieldErrors = {
   password?: string;
   passwordConfirm?: string;
 };
+
+const API_BASE_URL =
+  "https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1";
 
 const BOX_HEIGHT = 60;
 
@@ -303,10 +307,47 @@ export default function SignupScreen() {
         return;
       }
 
+      const response = await fetch(`${API_BASE_URL}/users`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({
+          login_id: trimmedId,
+          email: trimmedEmail,
+          password,
+        }),
+      });
+
+      const responseText = await response.text();
+      console.log("signup response status:", response.status);
+      console.log("signup response text:", responseText);
+
+      if (!response.ok) {
+        Alert.alert("회원가입 실패", "서버 회원가입에 실패했습니다.");
+        return;
+      }
+
+      const serverUser = responseText ? JSON.parse(responseText) : null;
+
+      const serverUserId =
+        serverUser?.id ??
+        serverUser?.user_id ??
+        serverUser?.userId ??
+        serverUser?.data?.id ??
+        serverUser?.data?.user_id;
+
+      if (!serverUserId) {
+        Alert.alert("회원가입 실패", "서버 사용자 ID를 받을 수 없습니다.");
+        return;
+      }
+
       const newUser: User = {
         id: trimmedId,
         email: trimmedEmail,
         password,
+        serverUserId: Number(serverUserId),
       };
 
       const updatedUsers = [...parsedUsers, newUser];
