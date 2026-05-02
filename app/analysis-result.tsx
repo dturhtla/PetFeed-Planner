@@ -11,8 +11,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const API_URL = "https://soulful-ouida-penetrably.ngrok-free.dev/food/analyze";
-const GO_SERVER_URL = "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
+const API_URL = "https://whoopee-untying-angler.ngrok-free.dev/food/analyze";
+const GO_SERVER_URL =
+  "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
 
 type ProfileData = {
   name: string;
@@ -82,10 +83,10 @@ const getLifeStage = (
 const bcsToNumber = (bcs: string): number => {
   const bcsMap: { [key: string]: number } = {
     "심한 저체중": 1,
-    "저체중": 3,
-    "정상": 5,
-    "과체중": 7,
-    "비만": 9,
+    저체중: 3,
+    정상: 5,
+    과체중: 7,
+    비만: 9,
   };
   return bcsMap[bcs] || 5;
 };
@@ -122,7 +123,15 @@ export default function AnalysisResultScreen() {
 
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
+      const serverUserId = parsedUser.serverUserId;
+
       console.log("email:", email);
+      console.log("serverUserId:", serverUserId);
+
+      if (!serverUserId) {
+        setError("서버 사용자 ID가 없습니다. 다시 로그인해주세요.");
+        return;
+      }
 
       // 선택된 반려동물 ID 가져오기
       const savedPetId = await AsyncStorage.getItem(`selectedPetId_${email}`);
@@ -130,12 +139,12 @@ export default function AnalysisResultScreen() {
 
       // Go 서버에서 반려동물 목록 가져오기
       const petsResponse = await fetch(
-        `${GO_SERVER_URL}/api/v1/users/${parsedUser.id}/pets`,
+        `${GO_SERVER_URL}/api/v1/users/${serverUserId}/pets`,
         {
           headers: {
             "ngrok-skip-browser-warning": "true",
           },
-        }
+        },
       );
 
       console.log("pets 응답 상태:", petsResponse.status);
@@ -151,9 +160,24 @@ export default function AnalysisResultScreen() {
       console.log("서버 반려동물 목록:", JSON.stringify(petsResult));
 
       const petIndex = savedPetId ? parseInt(savedPetId) : 0;
-      const selectedPet = Array.isArray(petsResult)
-        ? petsResult[petIndex]
-        : petsResult?.pets?.[petIndex];
+      const pets = Array.isArray(petsResult)
+        ? petsResult
+        : petsResult?.pets || [];
+
+      const selectedPet = savedPetId
+        ? pets.find(
+            (pet: any) => String(pet.pet_id ?? pet.id) === String(savedPetId),
+          )
+        : pets[0];
+
+      console.log("pets:", pets);
+      console.log("savedPetId:", savedPetId);
+      console.log("선택된 반려동물:", JSON.stringify(selectedPet));
+
+      if (!selectedPet) {
+        setError("선택한 반려동물 프로필을 찾을 수 없어요.");
+        return;
+      }
 
       console.log("선택된 반려동물:", JSON.stringify(selectedPet));
 
@@ -162,15 +186,33 @@ export default function AnalysisResultScreen() {
         return;
       }
 
-      const serverPetId = String(selectedPet.id);
+      const serverPetId = String(selectedPet.pet_id ?? selectedPet.id);
+
+      const savedProfiles = await AsyncStorage.getItem(`petProfiles_${email}`);
+      const localProfiles = savedProfiles ? JSON.parse(savedProfiles) : [];
+
+      const localProfile = localProfiles.find(
+        (p: any) => p.name === selectedPet.name,
+      );
+
       const profile: ProfileData = {
-        name: selectedPet.name || "",
-        age: selectedPet.age || "",
-        weight: String(selectedPet.weight || "0"),
-        gender: selectedPet.gender || "",
-        petType: selectedPet.species || selectedPet.petType || "",
-        bcs: selectedPet.bcs || "정상",
-        diseases: selectedPet.diseases || [],
+        name: selectedPet.name || localProfile?.name || "",
+        age: selectedPet.age || localProfile?.age || "",
+        weight: String(selectedPet.weight || localProfile?.weight || "0"),
+        gender: selectedPet.gender || localProfile?.gender || "",
+        petType:
+          selectedPet.species === "Dog"
+            ? "강아지"
+            : selectedPet.species === "Cat"
+              ? "고양이"
+              : localProfile?.petType || "",
+        bcs: selectedPet.bcs || localProfile?.bcs || "정상",
+        diseases:
+          selectedPet.diseases ||
+          localProfile?.diseases ||
+          (selectedPet.health_status && selectedPet.health_status !== "none"
+            ? [selectedPet.health_status]
+            : []),
       };
       console.log("서버에서 프로필 가져옴:", profile);
 
@@ -193,7 +235,9 @@ export default function AnalysisResultScreen() {
         age_year: String(years),
         age_month: String(months),
         life_stage: lifeStage,
-        health_conditions: (profile.diseases || []).filter(d => d !== "없음").join(","),
+        health_conditions: (profile.diseases || [])
+          .filter((d) => d !== "없음")
+          .join(","),
       });
 
       const formData = new FormData();
@@ -207,6 +251,17 @@ export default function AnalysisResultScreen() {
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+      const testResponse = await fetch(
+        "https://whoopee-untying-angler.ngrok-free.dev/docs",
+        {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        },
+      );
+
+      console.log("ngrok test status:", testResponse.status);
 
       const response = await fetch(`${API_URL}?${queryParams.toString()}`, {
         method: "POST",
@@ -251,24 +306,21 @@ export default function AnalysisResultScreen() {
         // 1. 사료 정보 등록 먼저
         let foodId = null;
         try {
-          const foodResponse = await fetch(
-            `${GO_SERVER_URL}/api/v1/foods`,
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "ngrok-skip-browser-warning": "true",
-              },
-              body: JSON.stringify({
-                fat_pct: result.food_info.fat_pct,
-                kcal_per_g: result.food_info.calories_per_100g
-                  ? result.food_info.calories_per_100g / 100
-                  : null,
-                product_name: result.food_info.product_name,
-                protein_pct: result.food_info.protein_pct,
-              }),
-            }
-          );
+          const foodResponse = await fetch(`${GO_SERVER_URL}/api/v1/foods`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "ngrok-skip-browser-warning": "true",
+            },
+            body: JSON.stringify({
+              fat_pct: result.food_info.fat_pct,
+              kcal_per_g: result.food_info.calories_per_100g
+                ? result.food_info.calories_per_100g / 100
+                : null,
+              product_name: result.food_info.product_name,
+              protein_pct: result.food_info.protein_pct,
+            }),
+          });
           const foodResult = await foodResponse.json();
           foodId = foodResult.food_id;
           console.log("사료 등록 완료, food_id:", foodId);
@@ -298,21 +350,18 @@ export default function AnalysisResultScreen() {
 
         // 3. Go 서버에 분석 결과 저장 (food_id 포함)
         try {
-          await fetch(
-            `${GO_SERVER_URL}/api/v1/pets/${serverPetId}/analysis`,
-            {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-                "ngrok-skip-browser-warning": "true",
-              },
-              body: JSON.stringify({
-                bcs: bcsToNumber(profile.bcs || ""),
-                food_id: foodId,
-                recommended_amount: result.feeding_recommendation.daily_grams,
-              }),
-            }
-          );
+          await fetch(`${GO_SERVER_URL}/api/v1/pets/${serverPetId}/analysis`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "ngrok-skip-browser-warning": "true",
+            },
+            body: JSON.stringify({
+              bcs: bcsToNumber(profile.bcs || ""),
+              food_id: foodId,
+              recommended_amount: result.feeding_recommendation.daily_grams,
+            }),
+          });
           console.log("Go 서버 저장 완료");
         } catch (err) {
           console.log("Go 서버 저장 실패:", err);
