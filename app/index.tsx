@@ -18,7 +18,7 @@ type User = {
   id: string;
   email: string;
   password: string;
-  server_id?: string;
+  serverUserId?: number;
 };
 
 export default function LoginScreen() {
@@ -55,14 +55,21 @@ export default function LoginScreen() {
       }
 
       // server_id 우선 사용, 없으면 로컬 id 사용
-      const serverId = foundUser.server_id || foundUser.id;
+      if (!foundUser.serverUserId) {
+        Alert.alert(
+          "로그인 실패",
+          "서버 사용자 ID가 없습니다. 다시 회원가입해주세요.",
+        );
+        return;
+      }
 
       await AsyncStorage.setItem(
         "loggedInUser",
         JSON.stringify({
-          id: serverId,
+          id: foundUser.id,
           email: foundUser.email,
           password: foundUser.password,
+          serverUserId: foundUser.serverUserId,
         }),
       );
 

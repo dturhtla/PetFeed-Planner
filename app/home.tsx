@@ -65,16 +65,44 @@ export default function HomeScreen() {
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
 
-      const savedProfiles = await AsyncStorage.getItem(getProfilesKey(email));
-      const parsedProfiles = savedProfiles ? JSON.parse(savedProfiles) : [];
+      const serverUserId = parsedUser.serverUserId;
 
-      const loadedPets: Pet[] = parsedProfiles.map(
-        (profile: any, index: number) => ({
-          id: String(index),
-          name: profile.name,
-          petType: profile.petType,
-        }),
+      if (!serverUserId) {
+        setPets([]);
+        setSelectedPetId(null);
+        return;
+      }
+
+      const petsResponse = await fetch(
+        `https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1/users/${serverUserId}/pets`,
+        {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        },
       );
+
+      if (!petsResponse.ok) {
+        setPets([]);
+        setSelectedPetId(null);
+        return;
+      }
+
+      const petsResult = await petsResponse.json();
+      const serverPets = Array.isArray(petsResult)
+        ? petsResult
+        : petsResult?.pets || [];
+
+      const loadedPets: Pet[] = serverPets.map((pet: any) => ({
+        id: String(pet.pet_id ?? pet.id),
+        name: pet.name,
+        petType:
+          pet.species === "Dog"
+            ? "강아지"
+            : pet.species === "Cat"
+              ? "고양이"
+              : pet.petType,
+      }));
 
       setPets(loadedPets);
 
@@ -151,6 +179,7 @@ export default function HomeScreen() {
   };
 
   const handleSelectPet = async (pet: Pet) => {
+    console.log("선택한 pet id:", pet.id);
     try {
       const savedUser = await AsyncStorage.getItem("loggedInUser");
       if (!savedUser) return;

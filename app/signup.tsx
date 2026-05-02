@@ -32,9 +32,6 @@ type FieldErrors = {
   passwordConfirm?: string;
 };
 
-const API_BASE_URL =
-  "https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1";
-
 const BOX_HEIGHT = 60;
 
 const isValidEmail = (value: string) => {
@@ -301,36 +298,16 @@ export default function SignupScreen() {
 
       console.log("회원가입 응답 상태:", registerResponse.status);
 
-      if (!registerResponse.ok) {
-        const errText = await registerResponse.text();
-        console.log("회원가입 실패:", errText);
-        Alert.alert("오류", "회원가입 중 문제가 발생했습니다.");
-        return;
-      }
-
-      const response = await fetch(`${API_BASE_URL}/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
-        },
-        body: JSON.stringify({
-          login_id: trimmedId,
-          email: trimmedEmail,
-          password,
-        }),
-      });
-
-      const responseText = await response.text();
-      console.log("signup response status:", response.status);
-      console.log("signup response text:", responseText);
-
-      if (!response.ok) {
-        Alert.alert("회원가입 실패", "서버 회원가입에 실패했습니다.");
-        return;
-      }
+      const responseText = await registerResponse.text();
+      console.log("회원가입 응답 text:", responseText);
 
       const serverUser = responseText ? JSON.parse(responseText) : null;
+
+      if (!registerResponse.ok) {
+        console.log("회원가입 실패:", responseText);
+        Alert.alert("오류", responseText);
+        return;
+      }
 
       const serverUserId =
         serverUser?.id ??
@@ -361,9 +338,10 @@ export default function SignupScreen() {
       await AsyncStorage.setItem(
         "loggedInUser",
         JSON.stringify({
-          id: serverUserId,
+          id: trimmedId,
           email: trimmedEmail,
           password,
+          serverUserId: Number(serverUserId),
         }),
       );
 
