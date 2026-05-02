@@ -26,8 +26,6 @@ const menuList = [
   { title: "급여 기록", icon: "clipboard-outline", route: "/records" },
   { title: "AI 챗봇", icon: "chatbubble-ellipses-outline", route: "/chatbot" },
 ];
-
-const getProfilesKey = (email: string) => `petProfiles_${email}`;
 const getSelectedPetKey = (email: string) => `selectedPetId_${email}`;
 
 export default function HomeScreen() {
