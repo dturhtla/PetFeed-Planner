@@ -18,6 +18,7 @@ type User = {
   id: string;
   email: string;
   password: string;
+  server_id?: string;
 };
 
 export default function LoginScreen() {
@@ -53,7 +54,17 @@ export default function LoginScreen() {
         return;
       }
 
-      await AsyncStorage.setItem("loggedInUser", JSON.stringify(foundUser));
+      // server_id 우선 사용, 없으면 로컬 id 사용
+      const serverId = foundUser.server_id || foundUser.id;
+
+      await AsyncStorage.setItem(
+        "loggedInUser",
+        JSON.stringify({
+          id: serverId,
+          email: foundUser.email,
+          password: foundUser.password,
+        }),
+      );
 
       const completed = await AsyncStorage.getItem(
         `profileCompleted_${foundUser.email}`,
