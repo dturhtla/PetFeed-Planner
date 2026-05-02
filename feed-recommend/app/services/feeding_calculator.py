@@ -87,17 +87,15 @@ def check_ingredient_warnings(
     warnings = []
 
     species_dangerous = {
-        "dog": ["xylitol", "자일리톨", "포도", "grape", "양파", "onion",
-                "마늘", "garlic", "초콜릿", "chocolate", "카페인", "caffeine"],
-        "cat": ["양파", "onion", "마늘", "garlic", "초콜릿", "chocolate",
-                "카페인", "caffeine", "참치통조림"],
+        "dog": ["자일리톨", "포도", "양파", "마늘", "초콜릿", "카페인"],
+        "cat": ["양파", "마늘", "초콜릿", "카페인", "참치통조림"],
     }
 
     condition_dangerous = {
-        "kidney_disease": ["인", "나트륨", "phosphorus", "sodium"],
-        "diabetes":       ["corn", "옥수수", "설탕", "당밀", "sugar"],
-        "obesity":        ["corn syrup", "당밀", "fructose"],
-        "heart_disease":  ["나트륨", "sodium", "salt", "소금"],
+        "kidney_disease": ["인", "나트륨", "인산염"],
+        "diabetes":       ["옥수수", "설탕", "당밀", "과당"],
+        "obesity":        ["물엿", "당밀", "과당"],
+        "heart_disease":  ["나트륨", "소금"],
     }
 
     dangerous = species_dangerous.get(species, [])
@@ -154,7 +152,7 @@ async def generate_recommendation_text(
 - 조지방: {food.fat_pct}%
 
 급여량 계산 결과:
-- 수식 계산 급여량: {daily_grams:.0f}g
+- 최종 권장 급여량: {daily_grams:.0f}g
 - {official_info}
 {warning_info}
 
@@ -190,19 +188,12 @@ async def calculate_feeding(
     kcal_per_100g = food.calories_per_100g if food.calories_per_100g else default_kcal.get(species, 385)
     formula_grams = (daily_kcal / kcal_per_100g) * 100
 
-    # 2. 공식 권장량 검색 + 추천 코멘트 병렬 처리
-    official_grams_result, recommendation_text = await asyncio.gather(
-        search_official_feeding_guide(
+    # 2. 공식 권장량 검색
+    official_grams = None
+    if food.brand and food.product_name:
+        official_grams = await search_official_feeding_guide(
             food.brand, food.product_name, species, weight_kg, age_years
-        ) if food.brand and food.product_name else asyncio.sleep(0),
-        generate_recommendation_text(
-            pet_name, species, weight_kg, age_years,
-            life_stage, health_conditions, food,
-            formula_grams, None, None
         )
-    )
-
-    official_grams = official_grams_result if isinstance(official_grams_result, float) else None
 
     # 3. 교차 검증 및 최종 급여량 결정
     warning_message = None
@@ -230,6 +221,13 @@ async def calculate_feeding(
         species,
         health_conditions,
         food.main_ingredients if food.main_ingredients else []
+    )
+
+    # 6. 최종 급여량 확정 후 추천 코멘트 생성
+    recommendation_text = await generate_recommendation_text(
+        pet_name, species, weight_kg, age_years,
+        life_stage, health_conditions, food,
+        final_grams, official_grams, warning_message
     )
 
     return {
