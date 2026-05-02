@@ -15,10 +15,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+const GO_SERVER_URL = "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
+
 type User = {
   id: string;
   email: string;
   password: string;
+  server_id?: string;
 };
 
 type FieldErrors = {
@@ -276,42 +279,59 @@ export default function SignupScreen() {
         return;
       }
 
-      const savedUsers = await AsyncStorage.getItem("users");
-      const parsedUsers: User[] = savedUsers ? JSON.parse(savedUsers) : [];
-
-      const idExists = parsedUsers.some(
-        (user) => user.id.toLowerCase() === trimmedId.toLowerCase(),
+      // Go 서버에 회원가입 요청
+      const registerResponse = await fetch(
+        `${GO_SERVER_URL}/api/v1/auth/register`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+          body: JSON.stringify({
+            email: trimmedEmail,
+            password,
+          }),
+        }
       );
 
-      if (idExists) {
-        setErrors((prev) => ({
-          ...prev,
-          id: "이미 사용 중인 아이디입니다.",
-        }));
+      console.log("회원가입 응답 상태:", registerResponse.status);
+
+      if (!registerResponse.ok) {
+        const errText = await registerResponse.text();
+        console.log("회원가입 실패:", errText);
+        Alert.alert("오류", "회원가입 중 문제가 발생했습니다.");
         return;
       }
 
-      const emailExists = parsedUsers.some(
-        (user) => user.email.toLowerCase() === trimmedEmail,
-      );
+      const registerResult = await registerResponse.json();
+      console.log("회원가입 결과:", registerResult);
 
-      if (emailExists) {
-        setErrors((prev) => ({
-          ...prev,
-          email: "이미 사용 중인 이메일입니다.",
-        }));
-        return;
-      }
+      // 서버에서 받은 user_id 저장
+      const serverUserId = String(registerResult.user_id || registerResult.id);
 
       const newUser: User = {
         id: trimmedId,
         email: trimmedEmail,
         password,
+        server_id: serverUserId,  // ← 서버 user_id 저장
       };
 
+      // 로컬에 저장
+      const savedUsers = await AsyncStorage.getItem("users");
+      const parsedUsers: User[] = savedUsers ? JSON.parse(savedUsers) : [];
       const updatedUsers = [...parsedUsers, newUser];
       await AsyncStorage.setItem("users", JSON.stringify(updatedUsers));
-      setUsers(updatedUsers);
+
+      // 서버 user_id를 loggedInUser에 저장
+      await AsyncStorage.setItem(
+        "loggedInUser",
+        JSON.stringify({
+          id: serverUserId,
+          email: trimmedEmail,
+          password,
+        })
+      );
 
       Alert.alert("회원가입 완료", "회원가입이 완료되었습니다.", [
         {
