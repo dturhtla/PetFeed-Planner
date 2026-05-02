@@ -159,7 +159,6 @@ export default function AnalysisResultScreen() {
       const petsResult = await petsResponse.json();
       console.log("서버 반려동물 목록:", JSON.stringify(petsResult));
 
-      const petIndex = savedPetId ? parseInt(savedPetId) : 0;
       const pets = Array.isArray(petsResult)
         ? petsResult
         : petsResult?.pets || [];
