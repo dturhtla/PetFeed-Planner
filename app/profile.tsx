@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { storageKeys } from "../utils/storageKeys";
 
 type GenderType = "남" | "여" | "중성화" | "";
 type PetType = "강아지" | "고양이" | "";
@@ -130,12 +131,6 @@ export default function ProfileScreen() {
 
   const [errors, setErrors] = useState<FieldErrors>({});
   const [openPicker, setOpenPicker] = useState<PickerType>(null);
-
-  const getDraftKey = (email: string) => `petProfileDraft_${email}`;
-  const getProfileKey = (email: string) => `petProfile_${email}`;
-  const getProfilesKey = (email: string) => `petProfiles_${email}`;
-  const getCompletedKey = (email: string) => `profileCompleted_${email}`;
-  const getFlowModeKey = (email: string) => `petProfileFlowMode_${email}`;
 
   const normalizeName = (value: string) => value.trim();
   const isValidName = (value: string) => /^[a-zA-Z가-힣\s]+$/.test(value);
@@ -352,8 +347,14 @@ export default function ProfileScreen() {
       diseases,
     };
 
-    await AsyncStorage.setItem(getDraftKey(userEmail), JSON.stringify(draft));
-    await AsyncStorage.setItem(getFlowModeKey(userEmail), profileEntryMode);
+    await AsyncStorage.setItem(
+      storageKeys.petProfileDraft(userEmail),
+      JSON.stringify(draft),
+    );
+    await AsyncStorage.setItem(
+      storageKeys.petProfileFlowMode(userEmail),
+      profileEntryMode,
+    );
   };
 
   const loadProfile = useCallback(async () => {
@@ -369,10 +370,18 @@ export default function ProfileScreen() {
       const email = parsedUser.email;
       setUserEmail(email);
 
-      const savedProfile = await AsyncStorage.getItem(getProfileKey(email));
-      const savedDraft = await AsyncStorage.getItem(getDraftKey(email));
-      const savedProfiles = await AsyncStorage.getItem(getProfilesKey(email));
-      const savedFlowMode = await AsyncStorage.getItem(getFlowModeKey(email));
+      const savedProfile = await AsyncStorage.getItem(
+        storageKeys.petProfile(email),
+      );
+      const savedDraft = await AsyncStorage.getItem(
+        storageKeys.petProfileDraft(email),
+      );
+      const savedProfiles = await AsyncStorage.getItem(
+        storageKeys.petProfiles(email),
+      );
+      const savedFlowMode = await AsyncStorage.getItem(
+        storageKeys.petProfileFlowMode(email),
+      );
 
       const parsedProfile = savedProfile ? JSON.parse(savedProfile) : null;
       const parsedDraft = savedDraft ? JSON.parse(savedDraft) : null;
@@ -400,7 +409,10 @@ export default function ProfileScreen() {
         const nextMode: ProfileEntryMode =
           forceInputMode && requestedEntryMode === "add" ? "add" : "signup";
 
-        await AsyncStorage.setItem(getFlowModeKey(email), nextMode);
+        await AsyncStorage.setItem(
+          storageKeys.petProfileFlowMode(email),
+          nextMode,
+        );
         setProfileEntryMode(nextMode);
 
         resetForm();
@@ -640,15 +652,18 @@ export default function ProfileScreen() {
       }
 
       await AsyncStorage.setItem(
-        getProfilesKey(userEmail),
+        storageKeys.petProfiles(userEmail),
         JSON.stringify(updatedProfiles),
       );
       await AsyncStorage.setItem(
-        getProfileKey(userEmail),
+        storageKeys.petProfile(userEmail),
         JSON.stringify(finalProfile),
       );
-      await AsyncStorage.setItem(getCompletedKey(userEmail), "true");
-      await AsyncStorage.removeItem(getFlowModeKey(userEmail));
+      await AsyncStorage.setItem(
+        storageKeys.profileCompleted(userEmail),
+        "true",
+      );
+      await AsyncStorage.removeItem(storageKeys.petProfileFlowMode(userEmail));
 
       setProfiles(updatedProfiles);
       setIsEditMode(false);
@@ -678,15 +693,21 @@ export default function ProfileScreen() {
           );
 
           await AsyncStorage.setItem(
-            getProfilesKey(userEmail),
+            storageKeys.petProfiles(userEmail),
             JSON.stringify(updatedProfiles),
           );
 
           if (updatedProfiles.length === 0) {
-            await AsyncStorage.removeItem(getProfileKey(userEmail));
-            await AsyncStorage.removeItem(getDraftKey(userEmail));
-            await AsyncStorage.removeItem(getCompletedKey(userEmail));
-            await AsyncStorage.removeItem(getFlowModeKey(userEmail));
+            await AsyncStorage.removeItem(storageKeys.petProfile(userEmail));
+            await AsyncStorage.removeItem(
+              storageKeys.petProfileDraft(userEmail),
+            );
+            await AsyncStorage.removeItem(
+              storageKeys.profileCompleted(userEmail),
+            );
+            await AsyncStorage.removeItem(
+              storageKeys.petProfileFlowMode(userEmail),
+            );
 
             setProfiles([]);
             resetForm();
@@ -700,7 +721,7 @@ export default function ProfileScreen() {
           }
 
           await AsyncStorage.setItem(
-            getProfileKey(userEmail),
+            storageKeys.petProfile(userEmail),
             JSON.stringify(updatedProfiles[0]),
           );
 
@@ -726,9 +747,12 @@ export default function ProfileScreen() {
   const handleAddProfile = async () => {
     if (!userEmail) return;
 
-    await AsyncStorage.removeItem(getProfileKey(userEmail));
-    await AsyncStorage.removeItem(getDraftKey(userEmail));
-    await AsyncStorage.setItem(getFlowModeKey(userEmail), "add");
+    await AsyncStorage.removeItem(storageKeys.petProfile(userEmail));
+    await AsyncStorage.removeItem(storageKeys.petProfileDraft(userEmail));
+    await AsyncStorage.setItem(
+      storageKeys.petProfileFlowMode(userEmail),
+      "add",
+    );
 
     resetForm();
     setProfileEntryMode("add");

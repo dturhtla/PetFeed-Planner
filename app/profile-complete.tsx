@@ -122,15 +122,25 @@ export default function ProfileCompleteScreen() {
 
       let isAllSuccess = true;
 
+      if (!parsedUser?.id) {
+        alert("로그인 정보가 없습니다. 다시 로그인해주세요.");
+        return;
+      }
+
       for (const profile of profiles) {
         const petData = {
-          user_id: Number(parsedUser.id) || 1,
+          user_id: Number(parsedUser.id),
           name: profile.name || "",
+          age: Number(profile.age) || 0,
           species: profile.petType === "고양이" ? "Cat" : "Dog",
           breed: "none",
           gender: getGenderValue(profile.gender),
           current_weight: Number(profile.weight) || 0,
-          health_status: "none",
+          bcs: profile.bcs || "none",
+          diseases: profile.diseases || [],
+          health_status: profile.diseases?.length
+            ? profile.diseases.join(", ")
+            : "none",
         };
 
         const response = await fetch(`${API_BASE_URL}/pets`, {
