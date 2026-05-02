@@ -124,15 +124,56 @@ export default function AnalysisResultScreen() {
       const email = parsedUser.email;
       console.log("email:", email);
 
-      const savedProfile = await AsyncStorage.getItem(`petProfile_${email}`);
-      console.log("savedProfile:", savedProfile);
+      // 선택된 반려동물 ID 가져오기
+      const savedPetId = await AsyncStorage.getItem(`selectedPetId_${email}`);
+      console.log("savedPetId:", savedPetId);
 
-      if (!savedProfile) {
-        setError("프로필 정보를 찾을 수 없어요. 프로필을 먼저 입력해주세요.");
+      // Go 서버에서 반려동물 목록 가져오기
+      const petsResponse = await fetch(
+        `${GO_SERVER_URL}/api/v1/users/${parsedUser.id}/pets`,
+        {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        }
+      );
+
+      console.log("pets 응답 상태:", petsResponse.status);
+
+      if (!petsResponse.ok) {
+        const errText = await petsResponse.text();
+        console.log("pets 응답 에러:", errText);
+        setError("반려동물 정보를 불러오지 못했어요. 서버를 확인해주세요.");
         return;
       }
 
-      const profile: ProfileData = JSON.parse(savedProfile);
+      const petsResult = await petsResponse.json();
+      console.log("서버 반려동물 목록:", JSON.stringify(petsResult));
+
+      const petIndex = savedPetId ? parseInt(savedPetId) : 0;
+      const selectedPet = Array.isArray(petsResult)
+        ? petsResult[petIndex]
+        : petsResult?.pets?.[petIndex];
+
+      console.log("선택된 반려동물:", JSON.stringify(selectedPet));
+
+      if (!selectedPet) {
+        setError("반려동물 프로필을 찾을 수 없어요.");
+        return;
+      }
+
+      const serverPetId = String(selectedPet.id);
+      const profile: ProfileData = {
+        name: selectedPet.name || "",
+        age: selectedPet.age || "",
+        weight: String(selectedPet.weight || "0"),
+        gender: selectedPet.gender || "",
+        petType: selectedPet.species || selectedPet.petType || "",
+        bcs: selectedPet.bcs || "정상",
+        diseases: selectedPet.diseases || [],
+      };
+      console.log("서버에서 프로필 가져옴:", profile);
+
       const { years, months } = parseAge(profile.age || "");
       const lifeStage = getLifeStage(
         profile.age || "",
@@ -258,7 +299,7 @@ export default function AnalysisResultScreen() {
         // 3. Go 서버에 분석 결과 저장 (food_id 포함)
         try {
           await fetch(
-            `${GO_SERVER_URL}/api/v1/pets/${parsedUser.id}/analysis`,
+            `${GO_SERVER_URL}/api/v1/pets/${serverPetId}/analysis`,
             {
               method: "PATCH",
               headers: {
