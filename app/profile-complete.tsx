@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { storageKeys } from "../utils/storageKeys";
 
 const API_BASE_URL =
   "https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1";
@@ -76,7 +77,8 @@ export default function ProfileCompleteScreen() {
       if (!parsedUser?.email) return;
 
       const email = parsedUser.email;
-      const profilesKey = `petProfiles_${email}`;
+
+      const profilesKey = storageKeys.petProfiles(email);
       const savedProfiles = await AsyncStorage.getItem(profilesKey);
 
       const parsedProfiles: ProfileData[] = savedProfiles
@@ -109,10 +111,10 @@ export default function ProfileCompleteScreen() {
 
       const email = parsedUser.email;
 
-      await AsyncStorage.removeItem(`petProfile_${email}`);
-      await AsyncStorage.removeItem(`petProfileDraft_${email}`);
-      await AsyncStorage.removeItem(`profileCompleted_${email}`);
-      await AsyncStorage.setItem(`petProfileFlowMode_${email}`, "signup");
+      storageKeys.petProfiles(email);
+      storageKeys.petProfileDraft(email);
+      storageKeys.profileCompleted(email);
+      storageKeys.petProfileFlowMode(email);
 
       router.push({
         pathname: "/profile",
@@ -186,8 +188,8 @@ export default function ProfileCompleteScreen() {
       }
 
       if (isAllSuccess) {
-        await AsyncStorage.setItem(`profileCompleted_${email}`, "true");
-        await AsyncStorage.removeItem(`petProfileFlowMode_${email}`);
+        storageKeys.profileCompleted(email);
+        storageKeys.petProfileFlowMode(email);
 
         show("프로필이 저장되었습니다");
 

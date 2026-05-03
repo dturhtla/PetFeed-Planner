@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { storageKeys } from "../utils/storageKeys";
 
 type PetProfileItem = {
   id: string;
@@ -47,9 +48,6 @@ type AlarmItem = {
 };
 
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
-const getAlarmKey = (email: string, petId: string) =>
-  `feeding_alarms_${email}_${petId}`;
 
 function to24Hour(period: "오전" | "오후", hour: string) {
   let h = Number(hour);
@@ -120,8 +118,6 @@ export default function FeedingHistoryScreen() {
   );
   const [selectedDate, setSelectedDate] = useState(formatDateByDot(new Date()));
 
-  const getRecordsKey = (email: string) => `feedingRecords_${email}`;
-
   const selectedPet = useMemo(() => {
     return petProfiles.find((pet) => pet.id === selectedPetId);
   }, [petProfiles, selectedPetId]);
@@ -136,7 +132,7 @@ export default function FeedingHistoryScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
 
       if (!savedUser) return;
 
@@ -145,12 +141,14 @@ export default function FeedingHistoryScreen() {
       setUserEmail(email);
 
       const savedMultiProfiles = await AsyncStorage.getItem(
-        `petProfiles_${email}`,
+        storageKeys.petProfiles(email),
       );
       const savedSingleProfile = await AsyncStorage.getItem(
-        `petProfile_${email}`,
+        storageKeys.petProfile(email),
       );
-      const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
+      const savedRecords = await AsyncStorage.getItem(
+        storageKeys.feedingRecords(email),
+      );
 
       let loadedProfiles: PetProfileItem[] = [];
 
@@ -208,7 +206,7 @@ export default function FeedingHistoryScreen() {
         }
 
         const savedAlarms = await AsyncStorage.getItem(
-          getAlarmKey(userEmail, selectedPetId),
+          storageKeys.feedingAlarms(userEmail, selectedPetId),
         );
 
         const parsedAlarms = savedAlarms ? JSON.parse(savedAlarms) : [];

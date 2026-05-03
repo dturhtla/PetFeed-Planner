@@ -24,15 +24,7 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-
-type StoredSinglePetProfile = {
-  name?: string;
-  age?: string;
-  weight?: string;
-  gender?: string;
-  petType?: string;
-  bcs?: string;
-};
+import { storageKeys } from "../utils/storageKeys";
 
 type PetProfileItem = {
   id: string;
@@ -77,12 +69,6 @@ type AlarmItem = {
 
 const FEEDING_TYPE_OPTIONS = ["아침", "점심", "저녁"] as const;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
-const getAlarmKey = (email: string, petId: string) =>
-  `feeding_alarms_${email}_${petId}`;
-
-const getFoodsKey = (email: string, petId: string) =>
-  `savedFoods_${email}_${petId}`;
 
 function createInitialTime() {
   const date = new Date();
@@ -247,10 +233,6 @@ export default function RecordsScreen() {
   const [isSavingFood, setIsSavingFood] = useState(false);
   const [isDeletingFood, setIsDeletingFood] = useState(false);
 
-  const getRecordsKey = (email: string) => `feedingRecords_${email}`;
-
-  const getSelectedPetKey = (email: string) => `selectedPetId_${email}`;
-
   const formatDate = () => {
     const now = new Date();
     const year = now.getFullYear();
@@ -343,7 +325,7 @@ export default function RecordsScreen() {
 
   const loadProfilesAndRecords = useCallback(async () => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
       if (!savedUser) {
         /* ... */ return;
       }
@@ -387,13 +369,15 @@ export default function RecordsScreen() {
       setPetProfiles(loadedProfiles);
 
       // 2. 마이그레이션 (loadedProfiles 설정 후에 실행)
-      const migrated = await AsyncStorage.getItem(`migrated_petId_${email}`);
+      const migrated = await AsyncStorage.getItem(
+        storageKeys.migratedPetId(email),
+      );
       if (migrated !== "true") {
         const savedRecordsRaw = await AsyncStorage.getItem(
-          getRecordsKey(email),
+          storageKeys.feedingRecords(email),
         );
         const savedMultiProfiles = await AsyncStorage.getItem(
-          `petProfiles_${email}`,
+          storageKeys.petProfiles(email),
         );
         const localProfiles = savedMultiProfiles
           ? JSON.parse(savedMultiProfiles)
@@ -412,7 +396,7 @@ export default function RecordsScreen() {
             return record;
           });
           await AsyncStorage.setItem(
-            getRecordsKey(email),
+            storageKeys.feedingRecords(email),
             JSON.stringify(migratedRecords),
           );
         }
@@ -423,8 +407,8 @@ export default function RecordsScreen() {
           );
           if (!serverPet) continue;
 
-          const oldFoodsKey = `savedFoods_${email}_${i}`;
-          const newFoodsKey = `savedFoods_${email}_${serverPet.id}`;
+          const oldFoodsKey = storageKeys.savedFoods(email, i);
+          const newFoodsKey = storageKeys.savedFoods(email, serverPet.id);
           const oldFoods = await AsyncStorage.getItem(oldFoodsKey);
           if (oldFoods) {
             const existingFoods = await AsyncStorage.getItem(newFoodsKey);
@@ -440,8 +424,8 @@ export default function RecordsScreen() {
             await AsyncStorage.removeItem(oldFoodsKey);
           }
 
-          const oldAlarmKey = `feeding_alarms_${email}_${i}`;
-          const newAlarmKey = `feeding_alarms_${email}_${serverPet.id}`;
+          const oldAlarmKey = storageKeys.feedingAlarms(email, i);
+          const newAlarmKey = storageKeys.feedingAlarms(email, serverPet.id);
           const oldAlarms = await AsyncStorage.getItem(oldAlarmKey);
           if (oldAlarms) {
             const existingAlarms = await AsyncStorage.getItem(newAlarmKey);
@@ -451,13 +435,13 @@ export default function RecordsScreen() {
           }
         }
 
-        await AsyncStorage.setItem(`migrated_petId_${email}`, "true");
+        await AsyncStorage.setItem(storageKeys.migratedPetId(email), "true");
         console.log("마이그레이션 완료!");
       }
 
       // 3. 이후 정상 로직
       const savedSelectedPetId = await AsyncStorage.getItem(
-        getSelectedPetKey(email),
+        storageKeys.selectedPetId(email),
       );
       const petIdForFoods =
         savedSelectedPetId &&
@@ -474,10 +458,15 @@ export default function RecordsScreen() {
         const firstPetId = loadedProfiles[0]?.id || "";
         setSelectedPetId(firstPetId);
         if (firstPetId)
-          await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
+          await AsyncStorage.setItem(
+            storageKeys.selectedPetId(email),
+            firstPetId,
+          );
       }
 
-      const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
+      const savedRecords = await AsyncStorage.getItem(
+        storageKeys.feedingRecords(email),
+      );
       if (savedRecords) {
         const parsedRecords = JSON.parse(savedRecords);
         setRecords(Array.isArray(parsedRecords) ? parsedRecords : []);
@@ -486,7 +475,7 @@ export default function RecordsScreen() {
       }
 
       const savedFoods = await AsyncStorage.getItem(
-        getFoodsKey(email, petIdForFoods),
+        storageKeys.savedFoods(email, petIdForFoods),
       );
       if (savedFoods) {
         const parsedFoods = JSON.parse(savedFoods);
@@ -517,7 +506,7 @@ export default function RecordsScreen() {
           }
 
           const savedAlarms = await AsyncStorage.getItem(
-            getAlarmKey(userEmail, selectedPetId),
+            storageKeys.feedingAlarms(userEmail, selectedPetId),
           );
 
           const parsedAlarms: AlarmItem[] = savedAlarms
@@ -832,7 +821,7 @@ export default function RecordsScreen() {
       setRecords(updatedRecords);
 
       await AsyncStorage.setItem(
-        getRecordsKey(userEmail),
+        storageKeys.feedingRecords(userEmail),
         JSON.stringify(updatedRecords),
       );
 
@@ -865,7 +854,7 @@ export default function RecordsScreen() {
       setRecords(updatedRecords);
 
       await AsyncStorage.setItem(
-        getRecordsKey(userEmail),
+        storageKeys.feedingRecords(userEmail),
         JSON.stringify(updatedRecords),
       );
 
@@ -980,7 +969,7 @@ export default function RecordsScreen() {
       setTempSelectedFood(newItem);
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail, selectedPetId),
+        storageKeys.savedFoods(userEmail, selectedPetId),
         JSON.stringify(updatedFoods),
       );
 
@@ -1022,7 +1011,7 @@ export default function RecordsScreen() {
       }
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail, selectedPetId),
+        storageKeys.savedFoods(userEmail, selectedPetId),
         JSON.stringify(updatedFoods),
       );
 
@@ -1083,11 +1072,11 @@ export default function RecordsScreen() {
       if (!userEmail) return;
 
       setSelectedPetId(pet.id);
-      await AsyncStorage.setItem(getSelectedPetKey(userEmail), pet.id);
+      await AsyncStorage.setItem(storageKeys.selectedPetId(userEmail), pet.id);
 
       // 선택된 반려동물의 사료 목록 다시 불러오기
       const savedFoods = await AsyncStorage.getItem(
-        getFoodsKey(userEmail, pet.id),
+        storageKeys.savedFoods(userEmail, pet.id),
       );
       if (savedFoods) {
         const parsedFoods = JSON.parse(savedFoods);
