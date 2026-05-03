@@ -1,8 +1,14 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   BackHandler,
@@ -132,8 +138,8 @@ function getAlarmsKey(email: string, petId: string) {
   return `feeding_alarms_${email}_${petId}`;
 }
 
-function getFoodsKey(email: string) {
-  return `savedFoods_${email}`;
+function getFoodsKey(email: string, petId: string) {
+  return `savedFoods_${email}_${petId}`;
 }
 
 function to24Hour(period: "오전" | "오후", hour: string) {
@@ -420,64 +426,62 @@ export default function FeedingAlarmScreen() {
     [],
   );
 
-  useEffect(() => {
-    const loadUserAndAlarms = async () => {
-      try {
-        const savedUser = await AsyncStorage.getItem("loggedInUser");
-        const parsedUser: LoggedInUser | null = savedUser
-          ? JSON.parse(savedUser)
-          : null;
+  useFocusEffect(
+    useCallback(() => {
+      const loadUserAndAlarms = async () => {
+        try {
+          const savedUser = await AsyncStorage.getItem("loggedInUser");
+          const parsedUser: LoggedInUser | null = savedUser
+            ? JSON.parse(savedUser)
+            : null;
 
-        if (!parsedUser?.email || !petId || typeof petId !== "string") {
-          setUserEmail("");
-          setAlarms([]);
-          setFoodLibrary(DEFAULT_FOOD_LIBRARY);
-          return;
-        }
+          if (!parsedUser?.email || !petId || typeof petId !== "string") {
+            setUserEmail("");
+            setAlarms([]);
+            setFoodLibrary(DEFAULT_FOOD_LIBRARY);
+            return;
+          }
 
-        const email = parsedUser.email;
-        setUserEmail(email);
+          const email = parsedUser.email;
+          setUserEmail(email);
 
-        const alarmsKey = getAlarmsKey(email, petId as string);
-        const foodKey = getFoodsKey(email);
+          const alarmsKey = getAlarmsKey(email, petId as string);
+          const foodKey = getFoodsKey(email, petId as string);
+          console.log("알람에서 읽는 키:", foodKey);
 
-        const savedAlarms = await AsyncStorage.getItem(alarmsKey);
-        const savedFoods = await AsyncStorage.getItem(foodKey);
+          const savedAlarms = await AsyncStorage.getItem(alarmsKey);
+          const savedFoods = await AsyncStorage.getItem(foodKey);
+          console.log("읽어온 데이터:", savedFoods);
 
-        if (savedAlarms) {
-          const parsed = JSON.parse(savedAlarms);
-          if (Array.isArray(parsed)) {
-            setAlarms(parsed);
+          if (savedAlarms) {
+            const parsed = JSON.parse(savedAlarms);
+            setAlarms(Array.isArray(parsed) ? parsed : []);
           } else {
             setAlarms([]);
           }
-        } else {
-          setAlarms([]);
-        }
 
-        let loadedFoods: FoodItem[] = DEFAULT_FOOD_LIBRARY;
-
-        if (savedFoods) {
-          const parsedFoods = JSON.parse(savedFoods);
-          if (Array.isArray(parsedFoods) && parsedFoods.length > 0) {
-            loadedFoods = parsedFoods;
+          let loadedFoods: FoodItem[] = DEFAULT_FOOD_LIBRARY;
+          if (savedFoods) {
+            const parsedFoods = JSON.parse(savedFoods);
+            if (Array.isArray(parsedFoods) && parsedFoods.length > 0) {
+              loadedFoods = parsedFoods;
+            }
           }
+
+          setFoodLibrary(loadedFoods);
+          const firstFood = loadedFoods[0] || EMPTY_FOOD;
+          setSelectedFood(firstFood);
+          setTempSelectedFood(firstFood);
+        } catch (error) {
+          console.log(error);
+        } finally {
+          setIsLoaded(true);
         }
+      };
 
-        setFoodLibrary(loadedFoods);
-
-        const firstFood = loadedFoods[0] || EMPTY_FOOD;
-        setSelectedFood(firstFood);
-        setTempSelectedFood(firstFood);
-      } catch (error) {
-        console.log(error);
-      } finally {
-        setIsLoaded(true);
-      }
-    };
-
-    loadUserAndAlarms();
-  }, [petId]);
+      loadUserAndAlarms();
+    }, [petId]),
+  );
 
   useEffect(() => {
     const onBackPress = () => {
@@ -727,7 +731,7 @@ export default function FeedingAlarmScreen() {
       setSelectedFood(newItem);
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail),
+        getFoodsKey(userEmail, petId as string),
         JSON.stringify(updatedFoods),
       );
 
@@ -767,7 +771,7 @@ export default function FeedingAlarmScreen() {
       }
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail),
+        getFoodsKey(userEmail, petId as string),
         JSON.stringify(updatedFoods),
       );
 
