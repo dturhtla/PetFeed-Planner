@@ -140,47 +140,56 @@ export default function FeedingHistoryScreen() {
       const email = parsedUser.email;
       setUserEmail(email);
 
-      const savedMultiProfiles = await AsyncStorage.getItem(
-        storageKeys.petProfiles(email),
-      );
-      const savedSingleProfile = await AsyncStorage.getItem(
-        storageKeys.petProfile(email),
-      );
       const savedRecords = await AsyncStorage.getItem(
         storageKeys.feedingRecords(email),
       );
 
+      const serverUserId = parsedUser.serverUserId;
+
       let loadedProfiles: PetProfileItem[] = [];
 
-      if (savedMultiProfiles) {
-        const parsedMulti = JSON.parse(savedMultiProfiles);
-
-        if (Array.isArray(parsedMulti)) {
-          loadedProfiles = parsedMulti.map((item: any, index: number) => ({
-            id: String(index),
-            name: item.name || `반려동물${index + 1}`,
-            petType: item.petType || "",
-          }));
-        }
-      } else if (savedSingleProfile) {
-        const parsedSingle = JSON.parse(savedSingleProfile);
-
-        loadedProfiles = [
+      if (serverUserId) {
+        const petsResponse = await fetch(
+          `https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1/users/${serverUserId}/pets`,
           {
-            id: "0",
-            name: parsedSingle.name || "반려동물",
-            petType: parsedSingle.petType || "",
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
           },
-        ];
+        );
+
+        if (petsResponse.ok) {
+          const petsResult = await petsResponse.json();
+          const serverPets = Array.isArray(petsResult)
+            ? petsResult
+            : petsResult?.pets || [];
+
+          loadedProfiles = serverPets
+            .map((pet: any) => ({
+              id: String(pet.pet_id ?? pet.id),
+              name: pet.name,
+              petType:
+                pet.species === "Dog"
+                  ? "강아지"
+                  : pet.species === "Cat"
+                    ? "고양이"
+                    : pet.petType || "",
+            }))
+            .sort(
+              (a: PetProfileItem, b: PetProfileItem) =>
+                Number(a.id) - Number(b.id),
+            );
+        }
       }
 
       setPetProfiles(loadedProfiles);
 
-      if (petId && loadedProfiles.some((pet) => pet.id === petId)) {
-        setSelectedPetId(petId);
-      } else {
-        setSelectedPetId(loadedProfiles[0]?.id ?? "");
-      }
+      const nextSelectedPetId =
+        petId && loadedProfiles.some((pet) => pet.id === petId)
+          ? petId
+          : loadedProfiles[0]?.id || "";
+
+      setSelectedPetId(nextSelectedPetId);
 
       if (savedRecords) {
         const parsedRecords = JSON.parse(savedRecords);
@@ -329,15 +338,71 @@ export default function FeedingHistoryScreen() {
     return "#D14A3A";
   };
 
-  const getDotColor = (date: Date) => {
+  const getDateStats = (dateKey: string) => {
     const dayRecords = records.filter(
-      (r) => r.petId === selectedPetId && r.date === formatDateByDot(date),
+      (r) => r.petId === selectedPetId && r.date === dateKey,
     );
 
-    // ⭐ 기록 없으면 무조건 도트 없음
-    if (dayRecords.length === 0) return "transparent";
+    if (dayRecords.length === 0) {
+      return null;
+    }
 
-    const dayKor = DAYS[date.getDay()];
+    const dateObj = parseDotDate(dateKey);
+    const dayKor = DAYS[dateObj.getDay()];
+
+    const dayAlarms = alarms.filter(
+      (alarm) => alarm.enabled && alarm.days?.includes(dayKor),
+    );
+
+    const missed = dayAlarms.filter((alarm) => {
+      const hasRecord = dayRecords.some(
+        (r) => r.source === "alarm" && r.alarmId === alarm.id,
+      );
+
+      const alarmDate = parseDotDate(dateKey);
+      alarmDate.setHours(to24Hour(alarm.period, alarm.hour));
+      alarmDate.setMinutes(Number(alarm.minute));
+      alarmDate.setSeconds(0);
+      alarmDate.setMilliseconds(0);
+
+      const missedBase = new Date(alarmDate);
+      missedBase.setHours(missedBase.getHours() + 2);
+
+      return missedBase < new Date();
+    });
+
+    if (dayRecords.length === 0 && missed.length === 0) return null;
+
+    const fedAmount = dayRecords.reduce(
+      (sum, r) => sum + getGramNumber(r.amount),
+      0,
+    );
+
+    const missedAmount = missed.reduce((sum, a) => sum + a.amount, 0);
+    const targetAmount = fedAmount + missedAmount;
+
+    const eatenAmount = dayRecords.reduce(
+      (sum, r) => sum + getGramNumber(r.eatenAmount ?? r.amount),
+      0,
+    );
+
+    const intakeRate =
+      targetAmount > 0 ? Math.round((eatenAmount / targetAmount) * 100) : 0;
+
+    return {
+      intakeRate,
+    };
+  };
+
+  const getDateIntakeRate = (date: Date) => {
+    const dateKey = formatDateByDot(date);
+
+    const dayRecords = records.filter(
+      (r) => r.petId === selectedPetId && r.date === dateKey,
+    );
+
+    const dateObj = parseDotDate(dateKey);
+    const dayKor = DAYS[dateObj.getDay()];
 
     const dayAlarms = alarms.filter(
       (alarm) => alarm.enabled && alarm.days?.includes(dayKor),
@@ -356,18 +421,23 @@ export default function FeedingHistoryScreen() {
       0,
     );
 
-    const missedAmount = missed.reduce((sum, a) => sum + a.amount, 0);
+    const missedAmount = missed.reduce((sum, alarm) => sum + alarm.amount, 0);
+    const targetAmount = fedAmount + missedAmount;
 
-    const target = fedAmount + missedAmount;
-
-    if (target === 0) return "transparent";
-
-    const eaten = dayRecords.reduce(
+    const eatenAmount = dayRecords.reduce(
       (sum, r) => sum + getGramNumber(r.eatenAmount ?? r.amount),
       0,
     );
 
-    const rate = Math.round((eaten / target) * 100);
+    return targetAmount > 0
+      ? Math.round((eatenAmount / targetAmount) * 100)
+      : 0;
+  };
+
+  const getDotColor = (date: Date) => {
+    const rate = getDateIntakeRate(date);
+
+    if (rate === null) return null;
 
     return getRateColor(rate);
   };
@@ -533,11 +603,11 @@ export default function FeedingHistoryScreen() {
               const dotColor =
                 item.isCurrentMonth && !isFuture
                   ? getDotColor(item.date)
-                  : "transparent";
+                  : null;
 
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={formatDateByDot(item.date)}
                   style={styles.dayCell}
                   activeOpacity={isFuture ? 1 : 0.75}
                   onPress={() => handlePressDate(item.date)}
@@ -563,9 +633,13 @@ export default function FeedingHistoryScreen() {
                     </View>
                   </View>
 
-                  <View
-                    style={[styles.dayDot, { backgroundColor: dotColor }]}
-                  />
+                  {dotColor ? (
+                    <Text style={[styles.dayDotText, { color: dotColor }]}>
+                      ●
+                    </Text>
+                  ) : (
+                    <Text style={styles.dayDotText}> </Text>
+                  )}
                 </TouchableOpacity>
               );
             })}
@@ -852,16 +926,15 @@ const styles = StyleSheet.create({
   },
   dayCell: {
     width: `${100 / 7}%`,
-    height: 42,
+    height: 50, // 46 → 50으로
     alignItems: "center",
     justifyContent: "flex-start",
-    paddingTop: 8, // ⭐ 기존보다 증가
+    paddingTop: 6,
   },
-
   dayCircleOuter: {
     width: 28,
     height: 28,
-    borderRadius: 14,
+    borderRadius: 14, // 이것도 있어야 함
     alignItems: "center",
     justifyContent: "center",
   },
@@ -869,14 +942,16 @@ const styles = StyleSheet.create({
   dayCircleInner: {
     width: 28,
     height: 28,
-    borderRadius: 999,
+    borderRadius: 14, // 이게 있어야 동그라미
     alignItems: "center",
     justifyContent: "center",
-    overflow: "hidden",
+    backgroundColor: "transparent",
   },
 
   dayCircleSelected: {
     backgroundColor: "#2F6B57",
+    borderRadius: 14, // 추가
+    elevation: 0,
   },
 
   dayCircleToday: {
@@ -888,6 +963,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "NanumB",
     color: "#333",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+    zIndex: 10,
+    elevation: 10,
   },
   dayTextSelected: {
     color: "#FFFFFF",
@@ -899,12 +978,13 @@ const styles = StyleSheet.create({
   futureText: {
     color: "#CFCFCF",
   },
-  dayDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 2,
-    transform: [{ scale: 1 }], // ⭐ 핵심 (안드로이드 렌더 안정화)
+  dayDotText: {
+    height: 10,
+    marginTop: 1,
+    fontSize: 9,
+    lineHeight: 10,
+    textAlign: "center",
+    includeFontPadding: false,
   },
   legendRow: {
     flexDirection: "row",
