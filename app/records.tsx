@@ -81,7 +81,8 @@ const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 const getAlarmKey = (email: string, petId: string) =>
   `feeding_alarms_${email}_${petId}`;
 
-const getFoodsKey = (email: string) => `savedFoods_${email}`;
+const getFoodsKey = (email: string, petId: string) =>
+  `savedFoods_${email}_${petId}`;
 
 function createInitialTime() {
   const date = new Date();
@@ -343,87 +344,140 @@ export default function RecordsScreen() {
   const loadProfilesAndRecords = useCallback(async () => {
     try {
       const savedUser = await AsyncStorage.getItem("loggedInUser");
-
       if (!savedUser) {
-        setUserEmail("");
-        setPetProfiles([]);
-        setSelectedPetId("");
-        setRecords([]);
-        setFoodLibrary([]);
-        setNearestAlarm(null);
-        setHasAnyEnabledAlarm(false);
-        setTodayFeedingSchedules([]);
-        return;
+        /* ... */ return;
       }
 
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
+      const serverUserId = parsedUser.serverUserId;
       setUserEmail(email);
 
-      const savedMultiProfiles = await AsyncStorage.getItem(
-        `petProfiles_${email}`,
+      // 1. 서버에서 pets 불러오기
+      const petsResponse = await fetch(
+        `https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1/users/${serverUserId}/pets`,
+        { headers: { "ngrok-skip-browser-warning": "true" } },
       );
-      const savedSingleProfile = await AsyncStorage.getItem(
-        `petProfile_${email}`,
-      );
-      const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
-      const savedFoods = await AsyncStorage.getItem(getFoodsKey(email));
 
       let loadedProfiles: PetProfileItem[] = [];
 
-      if (savedMultiProfiles) {
-        const parsedMulti = JSON.parse(savedMultiProfiles);
-
-        if (Array.isArray(parsedMulti)) {
-          loadedProfiles = parsedMulti.map((item: any, index: number) => ({
-            id: String(index),
-            name: item.name || `반려동물${index + 1}`,
-            petType: item.petType || "",
-          }));
-        }
-      } else if (savedSingleProfile) {
-        const parsedSingle: StoredSinglePetProfile =
-          JSON.parse(savedSingleProfile);
-
-        loadedProfiles = [
-          {
-            id: "0",
-            name: parsedSingle.name || "반려동물",
-            petType: parsedSingle.petType || "",
-          },
-        ];
+      if (petsResponse.ok) {
+        const petsResult = await petsResponse.json();
+        const serverPets = Array.isArray(petsResult)
+          ? petsResult
+          : petsResult?.pets || [];
+        loadedProfiles = serverPets.map((pet: any) => ({
+          id: String(pet.pet_id ?? pet.id),
+          name: pet.name,
+          petType:
+            pet.species === "Dog"
+              ? "강아지"
+              : pet.species === "Cat"
+                ? "고양이"
+                : "",
+        }));
       }
 
       if (loadedProfiles.length === 0) {
         loadedProfiles = [
-          {
-            id: "placeholder-1",
-            name: "반려동물",
-            petType: "",
-          },
+          { id: "placeholder-1", name: "반려동물", petType: "" },
         ];
       }
 
       setPetProfiles(loadedProfiles);
 
+      // 2. 마이그레이션 (loadedProfiles 설정 후에 실행)
+      const migrated = await AsyncStorage.getItem(`migrated_petId_${email}`);
+      if (migrated !== "true") {
+        const savedRecordsRaw = await AsyncStorage.getItem(
+          getRecordsKey(email),
+        );
+        const savedMultiProfiles = await AsyncStorage.getItem(
+          `petProfiles_${email}`,
+        );
+        const localProfiles = savedMultiProfiles
+          ? JSON.parse(savedMultiProfiles)
+          : [];
+
+        if (savedRecordsRaw) {
+          const parsedRecords: FeedingRecord[] = JSON.parse(savedRecordsRaw);
+          const migratedRecords = parsedRecords.map((record) => {
+            const localIndex = Number(record.petId);
+            if (!isNaN(localIndex) && localProfiles[localIndex]) {
+              const serverPet = loadedProfiles.find(
+                (p) => p.name === localProfiles[localIndex].name,
+              );
+              if (serverPet) return { ...record, petId: serverPet.id };
+            }
+            return record;
+          });
+          await AsyncStorage.setItem(
+            getRecordsKey(email),
+            JSON.stringify(migratedRecords),
+          );
+        }
+
+        for (let i = 0; i < localProfiles.length; i++) {
+          const serverPet = loadedProfiles.find(
+            (p) => p.name === localProfiles[i].name,
+          );
+          if (!serverPet) continue;
+
+          const oldFoodsKey = `savedFoods_${email}_${i}`;
+          const newFoodsKey = `savedFoods_${email}_${serverPet.id}`;
+          const oldFoods = await AsyncStorage.getItem(oldFoodsKey);
+          if (oldFoods) {
+            const existingFoods = await AsyncStorage.getItem(newFoodsKey);
+            const existing = existingFoods ? JSON.parse(existingFoods) : [];
+            const old = JSON.parse(oldFoods);
+            const merged = [...existing];
+            for (const food of old) {
+              if (!merged.some((f) => f.name === food.name)) {
+                merged.push({ ...food, petId: serverPet.id });
+              }
+            }
+            await AsyncStorage.setItem(newFoodsKey, JSON.stringify(merged));
+            await AsyncStorage.removeItem(oldFoodsKey);
+          }
+
+          const oldAlarmKey = `feeding_alarms_${email}_${i}`;
+          const newAlarmKey = `feeding_alarms_${email}_${serverPet.id}`;
+          const oldAlarms = await AsyncStorage.getItem(oldAlarmKey);
+          if (oldAlarms) {
+            const existingAlarms = await AsyncStorage.getItem(newAlarmKey);
+            if (!existingAlarms)
+              await AsyncStorage.setItem(newAlarmKey, oldAlarms);
+            await AsyncStorage.removeItem(oldAlarmKey);
+          }
+        }
+
+        await AsyncStorage.setItem(`migrated_petId_${email}`, "true");
+        console.log("마이그레이션 완료!");
+      }
+
+      // 3. 이후 정상 로직
       const savedSelectedPetId = await AsyncStorage.getItem(
         getSelectedPetKey(email),
       );
+      const petIdForFoods =
+        savedSelectedPetId &&
+        loadedProfiles.some((p) => p.id === savedSelectedPetId)
+          ? savedSelectedPetId
+          : loadedProfiles[0]?.id || "";
 
       if (
         savedSelectedPetId &&
-        loadedProfiles.some((pet) => pet.id === savedSelectedPetId)
+        loadedProfiles.some((p) => p.id === savedSelectedPetId)
       ) {
         setSelectedPetId(savedSelectedPetId);
       } else {
         const firstPetId = loadedProfiles[0]?.id || "";
         setSelectedPetId(firstPetId);
-
-        if (firstPetId) {
+        if (firstPetId)
           await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
-        }
       }
 
+      const savedRecords = await AsyncStorage.getItem(getRecordsKey(email));
       if (savedRecords) {
         const parsedRecords = JSON.parse(savedRecords);
         setRecords(Array.isArray(parsedRecords) ? parsedRecords : []);
@@ -431,6 +485,9 @@ export default function RecordsScreen() {
         setRecords([]);
       }
 
+      const savedFoods = await AsyncStorage.getItem(
+        getFoodsKey(email, petIdForFoods),
+      );
       if (savedFoods) {
         const parsedFoods = JSON.parse(savedFoods);
         setFoodLibrary(Array.isArray(parsedFoods) ? parsedFoods : []);
@@ -923,7 +980,7 @@ export default function RecordsScreen() {
       setTempSelectedFood(newItem);
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail),
+        getFoodsKey(userEmail, selectedPetId),
         JSON.stringify(updatedFoods),
       );
 
@@ -965,7 +1022,7 @@ export default function RecordsScreen() {
       }
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail),
+        getFoodsKey(userEmail, selectedPetId),
         JSON.stringify(updatedFoods),
       );
 
@@ -1027,6 +1084,17 @@ export default function RecordsScreen() {
 
       setSelectedPetId(pet.id);
       await AsyncStorage.setItem(getSelectedPetKey(userEmail), pet.id);
+
+      // 선택된 반려동물의 사료 목록 다시 불러오기
+      const savedFoods = await AsyncStorage.getItem(
+        getFoodsKey(userEmail, pet.id),
+      );
+      if (savedFoods) {
+        const parsedFoods = JSON.parse(savedFoods);
+        setFoodLibrary(Array.isArray(parsedFoods) ? parsedFoods : []);
+      } else {
+        setFoodLibrary([]);
+      }
 
       setIsPetSheetVisible(false);
       ToastAndroid.show(`${pet.name}으로 변경되었습니다`, ToastAndroid.SHORT);

@@ -80,13 +80,17 @@ export default function HomeScreen() {
         },
       );
 
+      console.log("home pets 응답 상태:", petsResponse.status);
+
       if (!petsResponse.ok) {
+        console.log("home pets 에러:", await petsResponse.text());
         setPets([]);
         setSelectedPetId(null);
         return;
       }
 
       const petsResult = await petsResponse.json();
+      console.log("home pets 결과:", JSON.stringify(petsResult));
       const serverPets = Array.isArray(petsResult)
         ? petsResult
         : petsResult?.pets || [];

@@ -7,11 +7,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const API_URL = "https://whoopee-untying-angler.ngrok-free.dev/food/analyze";
+const API_URL = "https://whoopee-untying-angler.ngrok-free.dev";
 const GO_SERVER_URL =
   "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
 
@@ -101,6 +103,7 @@ export default function AnalysisResultScreen() {
   const [error, setError] = useState<string | null>(null);
   const [foodInfo, setFoodInfo] = useState<FoodInfo | null>(null);
   const [feeding, setFeeding] = useState<FeedingRecommendation | null>(null);
+  const [analyzedPetName, setAnalyzedPetName] = useState("");
 
   const analyzeFood = useCallback(async () => {
     try {
@@ -227,6 +230,13 @@ export default function AnalysisResultScreen() {
       console.log("lifeStage:", lifeStage);
       console.log("imageUri:", imageUri);
 
+      const apiSpecies =
+        profile.petType === "강아지"
+          ? "Dog"
+          : profile.petType === "고양이"
+            ? "Cat"
+            : profile.petType;
+
       const queryParams = new URLSearchParams({
         pet_name: profile.name || "",
         species: profile.petType || "",
@@ -240,35 +250,35 @@ export default function AnalysisResultScreen() {
       });
 
       const formData = new FormData();
+
       formData.append("image", {
         uri: imageUri,
         type: "image/jpeg",
         name: "food.jpg",
       } as any);
 
-      console.log("API 호출 시작:", `${API_URL}?${queryParams.toString()}`);
+      const requestUrl = `${API_URL}/food/analyze?${queryParams.toString()}`;
+
+      console.log("현재 API_URL:", API_URL);
+
+      console.log("API 호출 시작:", requestUrl);
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 120000);
 
-      const testResponse = await fetch(
-        "https://whoopee-untying-angler.ngrok-free.dev/docs",
-        {
-          headers: {
-            "ngrok-skip-browser-warning": "true",
-          },
-        },
-      );
+      try {
+        await fetch(`${API_URL}/health`, {
+          headers: { "ngrok-skip-browser-warning": "true" },
+        });
+      } catch (_) {}
 
-      console.log("ngrok test status:", testResponse.status);
-
-      const response = await fetch(`${API_URL}?${queryParams.toString()}`, {
+      const response = await fetch(requestUrl, {
         method: "POST",
         body: formData,
+        signal: controller.signal,
         headers: {
           "ngrok-skip-browser-warning": "true",
         },
-        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
@@ -301,6 +311,7 @@ export default function AnalysisResultScreen() {
       if (result.status === "success") {
         setFoodInfo(result.food_info);
         setFeeding(result.feeding_recommendation);
+        setAnalyzedPetName(profile.name);
 
         // 1. 사료 정보 등록 먼저
         let foodId = null;
@@ -370,13 +381,86 @@ export default function AnalysisResultScreen() {
       }
 
       setError("분석 결과를 불러오지 못했어요.");
-    } catch (err) {
-      console.log("에러:", err);
-      setError("서버 연결에 실패했어요. 서버가 실행 중인지 확인해주세요.");
+    } catch (err: any) {
+      console.log("에러 타입:", err?.name);
+      console.log("에러 메시지:", err?.message);
+
+      if (err?.name === "AbortError") {
+        setError("요청 시간이 초과됐어요. (120초)");
+      } else if (err?.message?.includes("Network request failed")) {
+        setError("네트워크 오류예요. ngrok URL이 최신인지 확인해주세요.");
+      } else {
+        setError(`오류: ${err?.message || "알 수 없는 오류"}`);
+      }
     } finally {
       setIsLoading(false);
     }
   }, [imageUri]);
+
+  const getFoodsKey = (email: string, petId: string) =>
+    `savedFoods_${email}_${petId}`;
+
+  const handleSaveFoodToList = async () => {
+    if (!foodInfo || !feeding) return;
+
+    try {
+      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      if (!savedUser) {
+        ToastAndroid.show("로그인 정보를 찾을 수 없어요.", ToastAndroid.SHORT);
+        return;
+      }
+
+      const parsedUser = JSON.parse(savedUser);
+      const email = parsedUser.email;
+
+      // 서버 petId 그대로 사용
+      const savedPetId = await AsyncStorage.getItem(`selectedPetId_${email}`);
+      if (!savedPetId) {
+        ToastAndroid.show("반려동물을 선택해주세요.", ToastAndroid.SHORT);
+        return;
+      }
+
+      console.log("저장할 키:", `savedFoods_${email}_${savedPetId}`);
+
+      const savedFoods = await AsyncStorage.getItem(
+        `savedFoods_${email}_${savedPetId}`,
+      );
+      const foodList = savedFoods ? JSON.parse(savedFoods) : [];
+
+      const foodName = foodInfo.product_name || foodInfo.brand || "분석된 사료";
+
+      console.log("현재 저장된 목록:", JSON.stringify(foodList));
+      console.log("비교할 이름:", foodName);
+
+      const isDuplicate = foodList.some((food: any) => food.name === foodName);
+
+      if (isDuplicate) {
+        ToastAndroid.show("이미 존재하는 사료입니다", ToastAndroid.SHORT);
+        return;
+      }
+
+      const newFood = {
+        id: `${Date.now()}`,
+        name: foodName,
+        subLabel: foodInfo.brand || "AI 분석 사료",
+        gramLabel: `${feeding.daily_grams}g 권장`,
+        recommendedAmount: feeding.daily_grams,
+        petId: savedPetId,
+        petName: analyzedPetName,
+        isCustom: true,
+      };
+
+      await AsyncStorage.setItem(
+        `savedFoods_${email}_${savedPetId}`,
+        JSON.stringify([...foodList, newFood]),
+      );
+
+      ToastAndroid.show("사료목록에 추가되었습니다", ToastAndroid.SHORT);
+    } catch (error) {
+      console.log("사료 목록 저장 실패:", error);
+      ToastAndroid.show("사료목록 저장에 실패했어요.", ToastAndroid.SHORT);
+    }
+  };
 
   useEffect(() => {
     console.log("useEffect 실행됨");
@@ -485,11 +569,12 @@ export default function AnalysisResultScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>추천/주의 사항</Text>
-          <Text style={styles.desc}>
+          <Text style={[styles.desc, { color: "#2F6B57", fontWeight: "800" }]}>
             • 1일 권장 급여량: {feeding?.daily_grams ?? "-"}g (1회{" "}
             {feeding?.grams_per_meal ?? "-"}g, {feeding?.meals_per_day ?? "-"}
             회)
           </Text>
+
           <Text style={styles.desc}>• {feeding?.recommendation ?? "-"}</Text>
 
           {feeding?.ingredient_warnings?.length ? (
@@ -510,6 +595,12 @@ export default function AnalysisResultScreen() {
             <Text style={styles.desc}>• 위험 성분이 없습니다.</Text>
           )}
         </View>
+        <TouchableOpacity
+          style={styles.saveFoodButton}
+          onPress={handleSaveFoodToList}
+        >
+          <Text style={styles.saveFoodButtonText}>사료 목록에 저장</Text>
+        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -558,6 +649,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.6,
     borderBottomColor: "#E4E8E6",
   },
+  recommendText: {
+    marginTop: 12,
+    marginBottom: 12,
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#2F6B57",
+  },
+
+  saveFoodButton: {
+    marginTop: 10,
+    backgroundColor: "#2F6B57",
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+
+  saveFoodButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
   label: { fontSize: 14, color: "#333" },
   value: { fontSize: 14, fontWeight: "700", color: "#2F6B57" },
   desc: { fontSize: 13, color: "#555", lineHeight: 21, marginBottom: 6 },
