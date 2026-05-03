@@ -33,6 +33,8 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import { storageKeys } from "../utils/storageKeys";
+
 type LoggedInUser = {
   id: string;
   email: string;
@@ -133,14 +135,6 @@ const EMPTY_FOOD: FoodItem = {
 };
 
 const DEFAULT_FOOD_LIBRARY: FoodItem[] = [];
-
-function getAlarmsKey(email: string, petId: string) {
-  return `feeding_alarms_${email}_${petId}`;
-}
-
-function getFoodsKey(email: string, petId: string) {
-  return `savedFoods_${email}_${petId}`;
-}
 
 function to24Hour(period: "오전" | "오후", hour: string) {
   let h = Number(hour);
@@ -430,7 +424,9 @@ export default function FeedingAlarmScreen() {
     useCallback(() => {
       const loadUserAndAlarms = async () => {
         try {
-          const savedUser = await AsyncStorage.getItem("loggedInUser");
+          const savedUser = await AsyncStorage.getItem(
+            storageKeys.loggedInUser,
+          );
           const parsedUser: LoggedInUser | null = savedUser
             ? JSON.parse(savedUser)
             : null;
@@ -445,8 +441,8 @@ export default function FeedingAlarmScreen() {
           const email = parsedUser.email;
           setUserEmail(email);
 
-          const alarmsKey = getAlarmsKey(email, petId as string);
-          const foodKey = getFoodsKey(email, petId as string);
+          const alarmsKey = storageKeys.feedingAlarms(email, petId);
+          const foodKey = storageKeys.savedFoods(email, petId);
           console.log("알람에서 읽는 키:", foodKey);
 
           const savedAlarms = await AsyncStorage.getItem(alarmsKey);
@@ -517,7 +513,7 @@ export default function FeedingAlarmScreen() {
 
     const saveAndSync = async () => {
       try {
-        const alarmsKey = getAlarmsKey(userEmail, petId as string);
+        const alarmsKey = storageKeys.feedingAlarms(userEmail, petId);
         await AsyncStorage.setItem(alarmsKey, JSON.stringify(alarms));
         await syncFeedingAlarmNotifications(alarms);
       } catch (error) {
@@ -731,7 +727,7 @@ export default function FeedingAlarmScreen() {
       setSelectedFood(newItem);
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail, petId as string),
+        storageKeys.savedFoods(userEmail, petId as string),
         JSON.stringify(updatedFoods),
       );
 
@@ -771,7 +767,7 @@ export default function FeedingAlarmScreen() {
       }
 
       await AsyncStorage.setItem(
-        getFoodsKey(userEmail, petId as string),
+        storageKeys.savedFoods(userEmail, petId as string),
         JSON.stringify(updatedFoods),
       );
 
