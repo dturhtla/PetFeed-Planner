@@ -51,6 +51,9 @@ type FoodItem = {
   name: string;
   subLabel: string;
   gramLabel: string;
+  recommendedAmount?: number;
+  petId?: string;
+  petName?: string;
   isCustom?: boolean;
 };
 
@@ -223,7 +226,18 @@ export default function RecordsScreen() {
   const [newFoodGram, setNewFoodGram] = useState("");
 
   const [amount, setAmount] = useState("0");
+
+  const [quickAmount, setQuickAmount] = useState<number | null>(null);
+  const [quickAmountType, setQuickAmountType] = useState<
+    "recommend" | "previous" | null
+  >(null);
+  const [isQuickAmountSelected, setIsQuickAmountSelected] = useState(false);
+
   const [eatenAmount, setEatenAmount] = useState("0");
+
+  const [isEditingAmount, setIsEditingAmount] = useState(false);
+  const [isEditingEatenAmount, setIsEditingEatenAmount] = useState(false);
+
   const [selectedTime, setSelectedTime] = useState<Date>(createInitialTime());
 
   const [selectedAlarmId, setSelectedAlarmId] = useState<string | null>(null);
@@ -280,6 +294,9 @@ export default function RecordsScreen() {
     setNewFoodGram("");
     setIsFromAlarm(false);
     setSelectedAlarmId(null);
+    setQuickAmount(null);
+    setQuickAmountType(null);
+    setIsQuickAmountSelected(false);
   }, []);
 
   const closeAddModal = useCallback(() => {
@@ -348,16 +365,21 @@ export default function RecordsScreen() {
         const serverPets = Array.isArray(petsResult)
           ? petsResult
           : petsResult?.pets || [];
-        loadedProfiles = serverPets.map((pet: any) => ({
-          id: String(pet.pet_id ?? pet.id),
-          name: pet.name,
-          petType:
-            pet.species === "Dog"
-              ? "강아지"
-              : pet.species === "Cat"
-                ? "고양이"
-                : "",
-        }));
+        loadedProfiles = serverPets
+          .map((pet: any) => ({
+            id: String(pet.pet_id ?? pet.id),
+            name: pet.name,
+            petType:
+              pet.species === "Dog"
+                ? "강아지"
+                : pet.species === "Cat"
+                  ? "고양이"
+                  : "",
+          }))
+          .sort(
+            (a: PetProfileItem, b: PetProfileItem) =>
+              Number(a.id) - Number(b.id),
+          );
       }
 
       if (loadedProfiles.length === 0) {
@@ -887,25 +909,66 @@ export default function RecordsScreen() {
 
   const handleDecreaseAmount = () => {
     const current = Number(amount || "0");
-    const next = Math.max(5, current - 5);
+    const next = Math.max(1, current - 1);
     setAmount(String(next));
+    setIsQuickAmountSelected(false);
+  };
+
+  const applyQuickAmountForFood = (food: FoodItem | null) => {
+    if (!food) {
+      setQuickAmount(null);
+      setQuickAmountType(null);
+      setIsQuickAmountSelected(false);
+      return;
+    }
+
+    if (food.recommendedAmount) {
+      setQuickAmount(Number(food.recommendedAmount));
+      setQuickAmountType("recommend");
+      setIsQuickAmountSelected(false);
+      return;
+    }
+
+    const previousRecord = records
+      .filter(
+        (record) =>
+          record.petId === selectedPetId &&
+          record.foodName === food.name &&
+          getGramNumber(record.amount) > 0,
+      )
+      .slice()
+      .sort(
+        (a, b) => (b.sortKey ?? Number(b.id)) - (a.sortKey ?? Number(a.id)),
+      )[0];
+
+    if (previousRecord) {
+      setQuickAmount(getGramNumber(previousRecord.amount));
+      setQuickAmountType("previous");
+      setIsQuickAmountSelected(false);
+      return;
+    }
+
+    setQuickAmount(null);
+    setQuickAmountType(null);
+    setIsQuickAmountSelected(false);
   };
 
   const handleIncreaseAmount = () => {
     const current = Number(amount || "0");
-    const next = current + 5;
+    const next = current + 1;
     setAmount(String(next));
+    setIsQuickAmountSelected(false);
   };
 
   const handleDecreaseEatenAmount = () => {
     const current = Number(eatenAmount || "0");
-    const next = Math.max(0, current - 5);
+    const next = Math.max(0, current - 1);
     setEatenAmount(String(next));
   };
 
   const handleIncreaseEatenAmount = () => {
     const current = Number(eatenAmount || "0");
-    const next = current + 5;
+    const next = current + 1;
     setEatenAmount(String(next));
   };
 
@@ -919,6 +982,7 @@ export default function RecordsScreen() {
 
   const handleCompleteFoodSelection = () => {
     setSelectedFood(tempSelectedFood);
+    applyQuickAmountForFood(tempSelectedFood);
     setIsFoodSheetVisible(false);
     setIsAddFoodFormVisible(false);
     setNewFoodName("");
@@ -1626,7 +1690,24 @@ export default function RecordsScreen() {
                     <Ionicons name="remove-circle" size={20} color="#2F6B57" />
                   </TouchableOpacity>
 
-                  <Text style={styles.recordAmountValue}>{amount}g</Text>
+                  {isEditingAmount ? (
+                    <TextInput
+                      style={styles.recordAmountInput}
+                      value={amount}
+                      onChangeText={(text) => {
+                        setAmount(text.replace(/[^0-9]/g, ""));
+                        setIsQuickAmountSelected(false);
+                      }}
+                      keyboardType="numeric"
+                      autoFocus
+                      onBlur={() => setIsEditingAmount(false)}
+                      onSubmitEditing={() => setIsEditingAmount(false)}
+                    />
+                  ) : (
+                    <TouchableOpacity onPress={() => setIsEditingAmount(true)}>
+                      <Text style={styles.recordAmountValue}>{amount}g</Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity
                     onPress={handleIncreaseAmount}
@@ -1637,6 +1718,33 @@ export default function RecordsScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+
+              {quickAmount !== null ? (
+                <TouchableOpacity
+                  style={[
+                    styles.quickAmountButton,
+                    isQuickAmountSelected && styles.quickAmountButtonActive,
+                  ]}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setAmount(String(quickAmount));
+                    setEatenAmount(String(quickAmount));
+                    setIsQuickAmountSelected(true);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.quickAmountButtonText,
+                      isQuickAmountSelected &&
+                        styles.quickAmountButtonTextActive,
+                    ]}
+                  >
+                    {quickAmountType === "recommend"
+                      ? `추천 급여량 ${quickAmount}g`
+                      : `이전 급여량 ${quickAmount}g`}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
 
               <View style={styles.recordAmountBox}>
                 <Text style={styles.recordAmountLabel}>섭취량</Text>
@@ -1650,7 +1758,27 @@ export default function RecordsScreen() {
                     <Ionicons name="remove-circle" size={20} color="#2F6B57" />
                   </TouchableOpacity>
 
-                  <Text style={styles.recordAmountValue}>{eatenAmount}g</Text>
+                  {isEditingEatenAmount ? (
+                    <TextInput
+                      style={styles.recordAmountInput}
+                      value={eatenAmount}
+                      onChangeText={(text) =>
+                        setEatenAmount(text.replace(/[^0-9]/g, ""))
+                      }
+                      keyboardType="numeric"
+                      autoFocus
+                      onBlur={() => setIsEditingEatenAmount(false)}
+                      onSubmitEditing={() => setIsEditingEatenAmount(false)}
+                    />
+                  ) : (
+                    <TouchableOpacity
+                      onPress={() => setIsEditingEatenAmount(true)}
+                    >
+                      <Text style={styles.recordAmountValue}>
+                        {eatenAmount}g
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
                   <TouchableOpacity
                     onPress={handleIncreaseEatenAmount}
@@ -3115,5 +3243,40 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontFamily: "NanumB",
+  },
+
+  quickAmountButton: {
+    alignSelf: "flex-end",
+    marginTop: -4,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#2F6B57",
+    backgroundColor: "#FFFFFF",
+  },
+
+  quickAmountButtonActive: {
+    backgroundColor: "#2F6B57",
+  },
+
+  quickAmountButtonText: {
+    fontSize: 12,
+    fontFamily: "NanumB",
+    color: "#222222",
+  },
+
+  quickAmountButtonTextActive: {
+    color: "#FFFFFF",
+  },
+
+  recordAmountInput: {
+    minWidth: 48,
+    paddingHorizontal: 6,
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    textAlign: "center",
   },
 });

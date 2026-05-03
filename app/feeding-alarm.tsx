@@ -46,6 +46,9 @@ type FoodItem = {
   name: string;
   subLabel: string;
   gramLabel: string;
+  recommendedAmount?: number;
+  petId?: string;
+  petName?: string;
   isCustom?: boolean;
 };
 
@@ -394,6 +397,10 @@ export default function FeedingAlarmScreen() {
     useState<FoodItem>(EMPTY_FOOD);
 
   const [amount, setAmount] = useState(50);
+
+  const [isEditingAmount, setIsEditingAmount] = useState(false);
+  const [amountInput, setAmountInput] = useState("");
+
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [isFoodSheetVisible, setIsFoodSheetVisible] = useState(false);
   const [isAddFoodFormVisible, setIsAddFoodFormVisible] = useState(false);
@@ -568,6 +575,8 @@ export default function FeedingAlarmScreen() {
     setEditingTimeField(null);
     setHourInput("");
     setMinuteInput("");
+    setIsEditingAmount(false);
+    setAmountInput("");
   };
 
   const openCreateForm = () => {
@@ -602,11 +611,11 @@ export default function FeedingAlarmScreen() {
   };
 
   const handleDecreaseAmount = () => {
-    setAmount((prev) => Math.max(5, prev - 5));
+    setAmount((prev) => Math.max(1, prev - 1));
   };
 
   const handleIncreaseAmount = () => {
-    setAmount((prev) => prev + 5);
+    setAmount((prev) => prev + 1);
   };
 
   const toggleDay = (day: string) => {
@@ -1210,7 +1219,42 @@ export default function FeedingAlarmScreen() {
               <Ionicons name="remove" size={14} color="#FFFFFF" />
             </TouchableOpacity>
 
-            <Text style={styles.amountValue}>{amount}g</Text>
+            {isEditingAmount ? (
+              <TextInput
+                style={styles.amountInput}
+                value={amountInput}
+                onChangeText={(text) =>
+                  setAmountInput(text.replace(/[^0-9]/g, ""))
+                }
+                keyboardType="numeric"
+                autoFocus
+                onBlur={() => {
+                  const next = Number(amountInput);
+                  if (!Number.isNaN(next) && next > 0) {
+                    setAmount(next);
+                  }
+                  setIsEditingAmount(false);
+                  setAmountInput("");
+                }}
+                onSubmitEditing={() => {
+                  const next = Number(amountInput);
+                  if (!Number.isNaN(next) && next > 0) {
+                    setAmount(next);
+                  }
+                  setIsEditingAmount(false);
+                  setAmountInput("");
+                }}
+              />
+            ) : (
+              <TouchableOpacity
+                onPress={() => {
+                  setAmountInput(String(amount));
+                  setIsEditingAmount(true);
+                }}
+              >
+                <Text style={styles.amountValue}>{amount}g</Text>
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity
               style={styles.amountCircleButton}
@@ -1295,7 +1339,7 @@ export default function FeedingAlarmScreen() {
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
         <View style={styles.headerSide}>
-          <TouchableOpacity onPress={handleGoBack}>
+          <TouchableOpacity style={styles.backButton} onPress={handleGoBack}>
             <Ionicons name="chevron-back" size={28} color="#2F6B57" />
           </TouchableOpacity>
         </View>
@@ -1370,17 +1414,25 @@ export default function FeedingAlarmScreen() {
                         <Text style={styles.foodSub}>{food.subLabel}</Text>
                       </View>
 
-                      <TouchableOpacity
-                        activeOpacity={0.8}
-                        onPress={() => handleDeleteFood(food.id)}
-                        style={styles.foodDeleteButton}
-                      >
-                        <Ionicons
-                          name="trash-outline"
-                          size={18}
-                          color="#9A9A9A"
-                        />
-                      </TouchableOpacity>
+                      <View style={styles.foodItemRight}>
+                        <Text style={styles.foodGram}>
+                          {food.recommendedAmount
+                            ? `${food.recommendedAmount}g 권장`
+                            : food.gramLabel}
+                        </Text>
+
+                        <TouchableOpacity
+                          activeOpacity={0.8}
+                          onPress={() => handleDeleteFood(food.id)}
+                          style={styles.foodDeleteButton}
+                        >
+                          <Ionicons
+                            name="trash-outline"
+                            size={18}
+                            color="#9A9A9A"
+                          />
+                        </TouchableOpacity>
+                      </View>
                     </TouchableOpacity>
                   );
                 })
@@ -1484,9 +1536,11 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   headerSide: {
-    width: 48,
-    alignItems: "center",
+    width: 36,
+    height: 36,
     justifyContent: "center",
+    alignItems: "flex-start",
+    marginTop: -2,
   },
   headerCenter: {
     flex: 1,
@@ -2046,5 +2100,24 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: {
     backgroundColor: "#C9C9C9",
+  },
+  amountInput: {
+    width: 54,
+    marginHorizontal: 8,
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    textAlign: "center",
+  },
+  foodItemRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  foodGram: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#9A9A9A",
   },
 });

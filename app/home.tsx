@@ -95,7 +95,13 @@ export default function HomeScreen() {
         ? petsResult
         : petsResult?.pets || [];
 
-      const loadedPets: Pet[] = serverPets.map((pet: any) => ({
+      const orderedServerPets = [...serverPets].sort((a: any, b: any) => {
+        const aId = Number(a.pet_id ?? a.id ?? 0);
+        const bId = Number(b.pet_id ?? b.id ?? 0);
+        return aId - bId;
+      });
+
+      const loadedPets: Pet[] = orderedServerPets.map((pet: any) => ({
         id: String(pet.pet_id ?? pet.id),
         name: pet.name,
         petType:
@@ -107,6 +113,24 @@ export default function HomeScreen() {
       }));
 
       setPets(loadedPets);
+
+      const savedSelectedPetId = await AsyncStorage.getItem(
+        getSelectedPetKey(email),
+      );
+
+      if (
+        savedSelectedPetId &&
+        loadedPets.some((pet: any) => pet.id === savedSelectedPetId)
+      ) {
+        setSelectedPetId(savedSelectedPetId);
+      } else {
+        const firstPetId = loadedPets[0]?.id || null;
+        setSelectedPetId(firstPetId);
+
+        if (firstPetId) {
+          await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
+        }
+      }
 
       if (loadedPets.length === 0) {
         setSelectedPetId(null);
