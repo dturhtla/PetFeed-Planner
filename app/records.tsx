@@ -26,6 +26,8 @@ import {
 } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+
 type PetProfileItem = {
   id: string;
   name: string;
@@ -340,6 +342,11 @@ export default function RecordsScreen() {
     [],
   );
 
+  const loadIoTRecords = async (petId: string): Promise<FeedingRecord[]> => {
+    // TODO: IoT 조회 API 완성 후 여기만 실제 fetch로 교체
+    return [];
+  };
+
   const loadProfilesAndRecords = useCallback(async () => {
     try {
       const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
@@ -353,8 +360,13 @@ export default function RecordsScreen() {
       setUserEmail(email);
 
       // 1. 서버에서 pets 불러오기
+      if (!API_BASE_URL) {
+        show("서버 주소가 설정되지 않았습니다.");
+        return;
+      }
+
       const petsResponse = await fetch(
-        `https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1/users/${serverUserId}/pets`,
+        `${API_BASE_URL}/users/${serverUserId}/pets`,
         { headers: { "ngrok-skip-browser-warning": "true" } },
       );
 
@@ -489,12 +501,14 @@ export default function RecordsScreen() {
       const savedRecords = await AsyncStorage.getItem(
         storageKeys.feedingRecords(email),
       );
-      if (savedRecords) {
-        const parsedRecords = JSON.parse(savedRecords);
-        setRecords(Array.isArray(parsedRecords) ? parsedRecords : []);
-      } else {
-        setRecords([]);
-      }
+
+      const manualRecords: FeedingRecord[] = savedRecords
+        ? JSON.parse(savedRecords)
+        : [];
+
+      const iotRecords = await loadIoTRecords(petIdForFoods);
+
+      setRecords([...iotRecords, ...manualRecords]);
 
       const savedFoods = await AsyncStorage.getItem(
         storageKeys.savedFoods(email, petIdForFoods),
@@ -506,7 +520,8 @@ export default function RecordsScreen() {
         setFoodLibrary([]);
       }
     } catch (error) {
-      console.log(error);
+      console.log("loadProfilesAndRecords error:", error);
+      show("급여 기록 정보를 불러오는 중 문제가 발생했어요.");
     }
   }, []);
 
@@ -549,7 +564,8 @@ export default function RecordsScreen() {
 
           setTodayFeedingSchedules(todaySchedules);
         } catch (error) {
-          console.log(error);
+          console.log("loadPetAlarms error:", error);
+          show("급여 알림 정보를 불러오는 중 문제가 발생했어요.");
           setNearestAlarm(null);
           setHasAnyEnabledAlarm(false);
           setTodayFeedingSchedules([]);
@@ -839,6 +855,7 @@ export default function RecordsScreen() {
         feedingType: selectedFeedingType,
       };
 
+      // 기존 로컬 저장 유지
       const updatedRecords = [...records, newRecord];
       setRecords(updatedRecords);
 
@@ -848,7 +865,6 @@ export default function RecordsScreen() {
       );
 
       show("급여 기록이 저장되었습니다.");
-
       closeAddModal();
     } catch (error) {
       console.log("handleSaveRecord error: ", error);
@@ -1152,7 +1168,8 @@ export default function RecordsScreen() {
       setIsPetSheetVisible(false);
       ToastAndroid.show(`${pet.name}으로 변경되었습니다`, ToastAndroid.SHORT);
     } catch (error) {
-      console.log(error);
+      console.log("handleSelectPet error:", error);
+      show("반려동물 선택을 변경하는 중 문제가 발생했어요.");
     }
   };
 

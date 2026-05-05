@@ -26,6 +26,9 @@ const menuList = [
   { title: "급여 기록", icon: "clipboard-outline", route: "/records" },
   { title: "AI 챗봇", icon: "chatbubble-ellipses-outline", route: "/chatbot" },
 ];
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+
 const getSelectedPetKey = (email: string) => `selectedPetId_${email}`;
 
 export default function HomeScreen() {
@@ -71,8 +74,18 @@ export default function HomeScreen() {
         return;
       }
 
+      if (!API_BASE_URL) {
+        setPets([]);
+        setSelectedPetId(null);
+        ToastAndroid.show(
+          "서버 주소가 설정되지 않았습니다.",
+          ToastAndroid.SHORT,
+        );
+        return;
+      }
+
       const petsResponse = await fetch(
-        `https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1/users/${serverUserId}/pets`,
+        `${API_BASE_URL}/users/${serverUserId}/pets`,
         {
           headers: {
             "ngrok-skip-browser-warning": "true",
@@ -86,10 +99,24 @@ export default function HomeScreen() {
         console.log("home pets 에러:", await petsResponse.text());
         setPets([]);
         setSelectedPetId(null);
+        ToastAndroid.show(
+          "반려동물 정보를 불러오는 중 문제가 발생했어요.",
+          ToastAndroid.SHORT,
+        );
         return;
       }
 
-      const petsResult = await petsResponse.json();
+      let petsResult;
+      try {
+        petsResult = await petsResponse.json();
+      } catch (e) {
+        console.log("json parse error:", e);
+        ToastAndroid.show(
+          "반려동물 데이터를 처리하는 중 문제가 발생했어요.",
+          ToastAndroid.SHORT,
+        );
+        return;
+      }
       console.log("home pets 결과:", JSON.stringify(petsResult));
       const serverPets = Array.isArray(petsResult)
         ? petsResult
@@ -114,24 +141,6 @@ export default function HomeScreen() {
 
       setPets(loadedPets);
 
-      const savedSelectedPetId = await AsyncStorage.getItem(
-        getSelectedPetKey(email),
-      );
-
-      if (
-        savedSelectedPetId &&
-        loadedPets.some((pet: any) => pet.id === savedSelectedPetId)
-      ) {
-        setSelectedPetId(savedSelectedPetId);
-      } else {
-        const firstPetId = loadedPets[0]?.id || null;
-        setSelectedPetId(firstPetId);
-
-        if (firstPetId) {
-          await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
-        }
-      }
-
       if (loadedPets.length === 0) {
         setSelectedPetId(null);
         return;
@@ -144,10 +153,15 @@ export default function HomeScreen() {
         return;
       }
 
-      setSelectedPetId(loadedPets[0].id);
-      await AsyncStorage.setItem(getSelectedPetKey(email), loadedPets[0].id);
+      const firstPetId = loadedPets[0].id;
+      setSelectedPetId(firstPetId);
+      await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
     } catch (error) {
-      console.log(error);
+      console.log("loadSelectedPet error:", error);
+      ToastAndroid.show(
+        "반려동물 정보를 불러오는 중 문제가 발생했어요.",
+        ToastAndroid.SHORT,
+      );
     }
   }, [router]);
 
@@ -219,7 +233,11 @@ export default function HomeScreen() {
       setPetSheetVisible(false);
       ToastAndroid.show(`${pet.name}으로 변경되었습니다`, ToastAndroid.SHORT);
     } catch (error) {
-      console.log(error);
+      console.log("handleSelectPet error:", error);
+      ToastAndroid.show(
+        "반려동물 선택을 변경하는 중 문제가 발생했어요.",
+        ToastAndroid.SHORT,
+      );
     }
   };
 

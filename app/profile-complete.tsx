@@ -13,8 +13,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
 
-const API_BASE_URL =
-  "https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1";
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
 type ProfileData = {
   name?: string;
@@ -87,7 +86,8 @@ export default function ProfileCompleteScreen() {
 
       setProfiles(parsedProfiles);
     } catch (error) {
-      console.log(error);
+      console.log("loadProfiles error:", error);
+      show("프로필 정보를 불러오는 중 문제가 발생했어요.");
     }
   }, []);
 
@@ -124,7 +124,8 @@ export default function ProfileCompleteScreen() {
         },
       } as any);
     } catch (error) {
-      console.log(error);
+      console.log("handleAddProfile error:", error);
+      show("프로필 추가 화면으로 이동하는 중 문제가 발생했어요.");
     }
   };
 
@@ -147,6 +148,11 @@ export default function ProfileCompleteScreen() {
 
       if (!parsedUser?.serverUserId) {
         alert("로그인 정보가 없습니다. 다시 로그인해주세요.");
+        return;
+      }
+
+      if (!API_BASE_URL) {
+        show("서버 주소가 설정되지 않았습니다.");
         return;
       }
 
