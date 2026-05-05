@@ -31,6 +31,7 @@ type LoggedInUser = {
 };
 
 type ProfileData = {
+  id: string; // 추가
   name: string;
   age: string;
   weight: string;
@@ -116,9 +117,9 @@ export default function ProfileScreen() {
   const [profiles, setProfiles] = useState<ProfileData[]>([]);
   const [isFirstInputMode, setIsFirstInputMode] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
-  const [selectedProfileIndex, setSelectedProfileIndex] = useState<
-    number | null
-  >(null);
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(
+    null,
+  );
 
   const [name, setName] = useState("");
   const [ageYears, setAgeYears] = useState("");
@@ -244,7 +245,7 @@ export default function ProfileScreen() {
     return undefined;
   };
 
-  const validateBasicFields = () => {
+  const validateFields = ({ full = false }: { full?: boolean } = {}) => {
     const newErrors: FieldErrors = {};
     const trimmedName = normalizeName(filterNameInput(name));
     const trimmedWeight = weight.trim();
@@ -281,53 +282,14 @@ export default function ProfileScreen() {
       newErrors.petType = "종을 선택해주세요.";
     }
 
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const validateAllFields = () => {
-    const newErrors: FieldErrors = {};
-    const trimmedName = normalizeName(filterNameInput(name));
-    const trimmedWeight = weight.trim();
-    const ageError = validateAge();
-
-    if (!trimmedName) {
-      newErrors.name = "이름을 입력해주세요.";
-    } else if (trimmedName.length > NAME_MAX_LENGTH) {
-      newErrors.name = "이름은 20자까지만 입력 가능합니다.";
-    } else if (!isValidName(trimmedName)) {
-      newErrors.name = "이름은 한글, 영어, 공백만 입력 가능합니다.";
-    }
-
-    if (ageError) {
-      newErrors.age = ageError;
-    }
-
-    if (!trimmedWeight) {
-      newErrors.weight = "몸무게를 입력해주세요.";
-    } else if (trimmedWeight.endsWith(".")) {
-      newErrors.weight = "몸무게 형식이 올바르지 않습니다.";
-    } else {
-      const weightNumber = Number(trimmedWeight);
-      if (isNaN(weightNumber) || weightNumber <= 0) {
-        newErrors.weight = "몸무게는 0보다 큰 숫자만 입력해주세요.";
+    if (full) {
+      if (!bcs) {
+        newErrors.bcs = "BCS를 선택해주세요.";
       }
-    }
 
-    if (!gender) {
-      newErrors.gender = "성별을 선택해주세요.";
-    }
-
-    if (!petType) {
-      newErrors.petType = "종을 선택해주세요.";
-    }
-
-    if (!bcs) {
-      newErrors.bcs = "BCS를 선택해주세요.";
-    }
-
-    if (!diseases || diseases.length === 0) {
-      newErrors.diseases = "질병을 선택해주세요.";
+      if (!diseases || diseases.length === 0) {
+        newErrors.diseases = "질병을 선택해주세요.";
+      }
     }
 
     setErrors(newErrors);
@@ -338,6 +300,7 @@ export default function ProfileScreen() {
     if (!userEmail) return;
 
     const draft: ProfileData = {
+      id: selectedProfileId ?? `local_${Date.now()}_${Math.random()}`,
       name: normalizeName(filterNameInput(name)),
       age: formatAgeForSave(),
       weight: weight.trim(),
@@ -385,11 +348,16 @@ export default function ProfileScreen() {
 
       const parsedProfile = savedProfile ? JSON.parse(savedProfile) : null;
       const parsedDraft = savedDraft ? JSON.parse(savedDraft) : null;
-      const parsedProfiles: ProfileData[] = savedProfiles
-        ? JSON.parse(savedProfiles)
-        : parsedProfile
-          ? [parsedProfile]
-          : [];
+      const parsedProfiles: ProfileData[] = (
+        savedProfiles
+          ? JSON.parse(savedProfiles)
+          : parsedProfile
+            ? [parsedProfile]
+            : []
+      ).map((profile: any) => ({
+        id: profile.id ?? `local_${Date.now()}_${Math.random()}`,
+        ...profile,
+      }));
 
       const storedFlowMode: ProfileEntryMode =
         savedFlowMode === "add" ? "add" : "signup";
@@ -400,7 +368,7 @@ export default function ProfileScreen() {
         setProfileEntryMode("signup");
         setIsFirstInputMode(false);
         setIsEditMode(false);
-        setSelectedProfileIndex(null);
+        setSelectedProfileId(null);
         setErrors({});
         return;
       }
@@ -418,7 +386,7 @@ export default function ProfileScreen() {
         resetForm();
         setIsFirstInputMode(true);
         setIsEditMode(false);
-        setSelectedProfileIndex(null);
+        setSelectedProfileId(null);
         return;
       }
 
@@ -439,7 +407,7 @@ export default function ProfileScreen() {
         }
 
         setProfileEntryMode(storedFlowMode);
-        setSelectedProfileIndex(returnedEditIndex);
+        setSelectedProfileId(editingProfile?.id ?? null);
         setIsFirstInputMode(false);
         setIsEditMode(true);
         setErrors({});
@@ -449,10 +417,11 @@ export default function ProfileScreen() {
       setProfileEntryMode("signup");
       setIsFirstInputMode(false);
       setIsEditMode(false);
-      setSelectedProfileIndex(null);
+      setSelectedProfileId(null);
       setErrors({});
     } catch (error) {
-      console.log(error);
+      console.log("loadProfile error:", error);
+      show("프로필 정보를 불러오는 중 문제가 발생했어요.");
       setIsFirstInputMode(false);
       setIsEditMode(false);
     } finally {
@@ -493,7 +462,7 @@ export default function ProfileScreen() {
         if (isEditMode || isFirstInputMode) {
           setIsEditMode(false);
           setIsFirstInputMode(false);
-          setSelectedProfileIndex(null);
+          setSelectedProfileId(null);
           setErrors({});
           resetForm();
           return true;
@@ -525,7 +494,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (!validateBasicFields()) {
+    if (!validateFields()) {
       return;
     }
 
@@ -540,7 +509,8 @@ export default function ProfileScreen() {
         },
       } as any);
     } catch (error) {
-      console.log(error);
+      console.log("handleNextToBcs error:", error);
+      show("프로필 정보를 저장하는 중 문제가 발생했어요.");
     }
   };
 
@@ -550,7 +520,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (!validateBasicFields()) {
+    if (!validateFields()) {
       return;
     }
 
@@ -565,12 +535,13 @@ export default function ProfileScreen() {
           selectedBcs: bcs,
           petType,
           editIndex:
-            selectedProfileIndex !== null ? String(selectedProfileIndex) : "",
+            selectedProfileId !== null ? String(selectedProfileId) : "",
           petName: name,
         },
       } as any);
     } catch (error) {
-      console.log(error);
+      console.log("handleBcsEditPress error:", error);
+      show("BCS 화면으로 이동하는 중 문제가 발생했어요.");
     }
   };
 
@@ -580,7 +551,7 @@ export default function ProfileScreen() {
       return;
     }
 
-    if (!validateBasicFields() || !bcs) {
+    if (!validateFields() || !bcs) {
       setErrors((prev) => ({
         ...prev,
         bcs: !bcs ? "BCS를 선택해주세요." : prev.bcs,
@@ -591,19 +562,6 @@ export default function ProfileScreen() {
     try {
       await saveDraft();
 
-      if (selectedProfileIndex !== null) {
-        router.push({
-          pathname: "/disease-check",
-          params: {
-            from: "profile",
-            returnTo: "profileEdit",
-            selectedDiseases: JSON.stringify(diseases),
-            editIndex: String(selectedProfileIndex),
-          },
-        } as any);
-        return;
-      }
-
       router.push({
         params: {
           mode: "edit",
@@ -613,7 +571,8 @@ export default function ProfileScreen() {
         },
       } as any);
     } catch (error) {
-      console.log(error);
+      console.log("handleDiseaseEditPress error:", error);
+      show("질병 선택 화면으로 이동하는 중 문제가 발생했어요.");
     }
   };
 
@@ -626,7 +585,7 @@ export default function ProfileScreen() {
         return;
       }
 
-      if (!validateAllFields()) {
+      if (!validateFields({ full: true })) {
         return;
       }
 
@@ -634,6 +593,7 @@ export default function ProfileScreen() {
       const normalizedName = normalizeName(filterNameInput(name));
 
       const finalProfile: ProfileData = {
+        id: selectedProfileId ?? `local_${Date.now()}_${Math.random()}`,
         name: normalizedName,
         age: formatAgeForSave(),
         weight: formattedWeight,
@@ -645,8 +605,16 @@ export default function ProfileScreen() {
 
       const updatedProfiles = [...profiles];
 
-      if (selectedProfileIndex !== null) {
-        updatedProfiles[selectedProfileIndex] = finalProfile;
+      if (selectedProfileId !== null) {
+        const targetIndex = updatedProfiles.findIndex(
+          (profile) => profile.id === selectedProfileId,
+        );
+
+        if (targetIndex >= 0) {
+          updatedProfiles[targetIndex] = finalProfile;
+        } else {
+          updatedProfiles.push(finalProfile);
+        }
       } else {
         updatedProfiles.push(finalProfile);
       }
@@ -668,19 +636,20 @@ export default function ProfileScreen() {
       setProfiles(updatedProfiles);
       setIsEditMode(false);
       setIsFirstInputMode(false);
-      setSelectedProfileIndex(null);
+      setSelectedProfileId(null);
       setErrors({});
 
       show("프로필이 저장되었습니다.");
     } catch (error) {
-      console.log(error);
+      console.log("handleSave error:", error);
+      show("프로필을 저장하는 중 문제가 발생했어요.");
     } finally {
       setIsSavingProfile(false);
     }
   };
 
   const handleDeleteProfile = async () => {
-    if (!userEmail || selectedProfileIndex === null) return;
+    if (!userEmail || selectedProfileId === null) return;
 
     Alert.alert("삭제", "이 프로필을 삭제하시겠습니까?", [
       { text: "취소", style: "cancel" },
@@ -689,7 +658,7 @@ export default function ProfileScreen() {
         style: "destructive",
         onPress: async () => {
           const updatedProfiles = profiles.filter(
-            (_, index) => index !== selectedProfileIndex,
+            (profile) => profile.id !== selectedProfileId,
           );
 
           await AsyncStorage.setItem(
@@ -713,7 +682,7 @@ export default function ProfileScreen() {
             resetForm();
             setIsFirstInputMode(true);
             setIsEditMode(false);
-            setSelectedProfileIndex(null);
+            setSelectedProfileId(null);
 
             show("프로필이 삭제되었습니다.");
 
@@ -727,7 +696,7 @@ export default function ProfileScreen() {
 
           setProfiles(updatedProfiles);
           setIsEditMode(false);
-          setSelectedProfileIndex(null);
+          setSelectedProfileId(null);
           setErrors({});
 
           show("프로필이 삭제되었습니다.");
@@ -736,9 +705,9 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const handleProfileCardPress = (profile: ProfileData, index: number) => {
+  const handleProfileCardPress = (profile: ProfileData) => {
     applyProfileData(profile);
-    setSelectedProfileIndex(index);
+    setSelectedProfileId(profile.id);
     setIsEditMode(true);
     setIsFirstInputMode(false);
     setErrors({});
@@ -758,7 +727,7 @@ export default function ProfileScreen() {
     setProfileEntryMode("add");
     setIsFirstInputMode(true);
     setIsEditMode(false);
-    setSelectedProfileIndex(null);
+    setSelectedProfileId(null);
   };
 
   const renderProfileIcon = (type?: PetType) => {
@@ -1140,7 +1109,7 @@ export default function ProfileScreen() {
 
             if (isEditMode) {
               setIsEditMode(false);
-              setSelectedProfileIndex(null);
+              setSelectedProfileId(null);
               setErrors({});
               return;
             }
@@ -1177,12 +1146,12 @@ export default function ProfileScreen() {
         >
           <Text style={styles.listTitle}>내 반려동물</Text>
 
-          {profiles.map((item, index) => (
+          {profiles.map((item) => (
             <TouchableOpacity
-              key={index}
+              key={item.id}
               style={styles.profileCard}
               activeOpacity={0.85}
-              onPress={() => handleProfileCardPress(item, index)}
+              onPress={() => handleProfileCardPress(item)}
             >
               <View style={styles.profileCardAvatar}>
                 {renderCardIcon(item.petType)}

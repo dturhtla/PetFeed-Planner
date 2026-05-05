@@ -338,62 +338,6 @@ export default function FeedingHistoryScreen() {
     return "#D14A3A";
   };
 
-  const getDateStats = (dateKey: string) => {
-    const dayRecords = records.filter(
-      (r) => r.petId === selectedPetId && r.date === dateKey,
-    );
-
-    if (dayRecords.length === 0) {
-      return null;
-    }
-
-    const dateObj = parseDotDate(dateKey);
-    const dayKor = DAYS[dateObj.getDay()];
-
-    const dayAlarms = alarms.filter(
-      (alarm) => alarm.enabled && alarm.days?.includes(dayKor),
-    );
-
-    const missed = dayAlarms.filter((alarm) => {
-      const hasRecord = dayRecords.some(
-        (r) => r.source === "alarm" && r.alarmId === alarm.id,
-      );
-
-      const alarmDate = parseDotDate(dateKey);
-      alarmDate.setHours(to24Hour(alarm.period, alarm.hour));
-      alarmDate.setMinutes(Number(alarm.minute));
-      alarmDate.setSeconds(0);
-      alarmDate.setMilliseconds(0);
-
-      const missedBase = new Date(alarmDate);
-      missedBase.setHours(missedBase.getHours() + 2);
-
-      return missedBase < new Date();
-    });
-
-    if (dayRecords.length === 0 && missed.length === 0) return null;
-
-    const fedAmount = dayRecords.reduce(
-      (sum, r) => sum + getGramNumber(r.amount),
-      0,
-    );
-
-    const missedAmount = missed.reduce((sum, a) => sum + a.amount, 0);
-    const targetAmount = fedAmount + missedAmount;
-
-    const eatenAmount = dayRecords.reduce(
-      (sum, r) => sum + getGramNumber(r.eatenAmount ?? r.amount),
-      0,
-    );
-
-    const intakeRate =
-      targetAmount > 0 ? Math.round((eatenAmount / targetAmount) * 100) : 0;
-
-    return {
-      intakeRate,
-    };
-  };
-
   const getDateIntakeRate = (date: Date) => {
     const dateKey = formatDateByDot(date);
 
@@ -514,7 +458,7 @@ export default function FeedingHistoryScreen() {
           <Ionicons name="chevron-back" size={28} color="#2F6B57" />
         </TouchableOpacity>
 
-        <Text style={styles.headerTitle}>
+        <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">
           {selectedPet?.name ?? "반려동물"}의 급여 히스토리
         </Text>
 
@@ -817,6 +761,7 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   headerTitle: {
+    flex: 1, // ⭐ 추가
     fontSize: 18,
     fontFamily: "NanumB",
     color: "#2F6B57",

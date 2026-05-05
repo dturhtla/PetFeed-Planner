@@ -1,6 +1,5 @@
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Notifications from "expo-notifications";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import React, {
   useCallback,
@@ -16,7 +15,6 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -33,6 +31,14 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 
+import EditableTimeWheel, {
+  TIME_WHEEL_ITEM_HEIGHT as ITEM_HEIGHT,
+} from "../components/EditableTimeWheel";
+import {
+  cleanupGhostFeedingNotifications,
+  syncFeedingAlarmNotifications,
+  to24Hour,
+} from "../utils/feedingAlarmNotifications";
 import { storageKeys } from "../utils/storageKeys";
 
 type LoggedInUser = {
@@ -65,15 +71,6 @@ type AlarmItem = {
   enabled: boolean;
 };
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
-
 const show = (msg: string) => {
   ToastAndroid.show(msg, ToastAndroid.SHORT);
 };
@@ -93,6 +90,15 @@ const FEEDING_TYPE_OPTIONS = [
 ] as const;
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
+
+const EMPTY_FOOD: FoodItem = {
+  id: "temp",
+  name: "",
+  subLabel: "",
+  gramLabel: "",
+};
+
+const DEFAULT_FOOD_LIBRARY: FoodItem[] = [];
 
 const formatDaysLabel = (days: string[]) => {
   if (days.length === 0) return "반복 없음";
@@ -116,126 +122,8 @@ const formatDaysLabel = (days: string[]) => {
   return sortedDays.join(", ");
 };
 
-const ITEM_HEIGHT = 34;
 const WHEEL_VISIBLE_ROWS = 3;
 const LOOP_REPEAT = 7;
-
-const KOR_TO_WEEKDAY: Record<string, number> = {
-  일: 1,
-  월: 2,
-  화: 3,
-  수: 4,
-  목: 5,
-  금: 6,
-  토: 7,
-};
-
-const EMPTY_FOOD: FoodItem = {
-  id: "temp",
-  name: "",
-  subLabel: "",
-  gramLabel: "",
-};
-
-const DEFAULT_FOOD_LIBRARY: FoodItem[] = [];
-
-function to24Hour(period: "오전" | "오후", hour: string) {
-  let h = Number(hour);
-  if (period === "오전") {
-    if (h === 12) h = 0;
-  } else {
-    if (h !== 12) h += 12;
-  }
-  return h;
-}
-
-async function ensureNotificationPermission() {
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-
-  if (existingStatus !== "granted") {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-
-  return finalStatus === "granted";
-}
-
-async function ensureAndroidChannel() {
-  if (Platform.OS !== "android") return;
-
-  await Notifications.setNotificationChannelAsync("feeding-alarm", {
-    name: "급여 알림",
-    importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
-    lightColor: "#2F6B57",
-  });
-}
-
-async function clearFeedingAlarmNotifications() {
-  const scheduled = await Notifications.getAllScheduledNotificationsAsync();
-
-  for (const item of scheduled) {
-    const data = item.content.data;
-
-    if (
-      data?.kind === "feeding-alarm" ||
-      data?.alarmId ||
-      item.content.title === "급여 알림"
-    ) {
-      await Notifications.cancelScheduledNotificationAsync(item.identifier);
-    }
-  }
-}
-
-async function syncFeedingAlarmNotifications(alarms: AlarmItem[]) {
-  const granted = await ensureNotificationPermission();
-  if (!granted) return;
-
-  await ensureAndroidChannel();
-  await clearFeedingAlarmNotifications();
-
-  const enabledAlarms = alarms.filter(
-    (alarm) => alarm.enabled && alarm.days && alarm.days.length > 0,
-  );
-
-  for (const alarm of enabledAlarms) {
-    const hour24 = to24Hour(alarm.period, alarm.hour);
-
-    for (const day of alarm.days) {
-      const weekday = KOR_TO_WEEKDAY[day];
-      if (!weekday) continue;
-
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "급여 알림",
-          body: `${alarm.foodName} ${alarm.amount}g 급여할 시간이에요.`,
-          sound: true,
-          data: {
-            kind: "feeding-alarm",
-            alarmId: alarm.id,
-            feedingType: alarm.feedingType,
-          },
-        },
-        trigger: {
-          type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
-          weekday,
-          hour: hour24,
-          minute: Number(alarm.minute),
-          channelId: "feeding-alarm",
-        },
-      });
-    }
-  }
-}
-
-async function cleanupGhostFeedingNotifications() {
-  try {
-    await clearFeedingAlarmNotifications();
-  } catch (error) {
-    console.log("cleanupGhostFeedingNotifications error:", error);
-  }
-}
 
 function buildLoopedData(base: string[]) {
   return Array.from({ length: LOOP_REPEAT }, () => base).flat();
@@ -259,91 +147,6 @@ function formatDisplayTime(period: string, hour: string, minute: string) {
   }
 
   return `${String(hourNum).padStart(2, "0")}:${minute}`;
-}
-
-type EditableTimeWheelProps = {
-  value: string;
-  loopedOptions: string[];
-  scrollRef: React.RefObject<ScrollView | null>;
-  isEditing: boolean;
-  inputValue: string;
-  onInputChange: (text: string) => void;
-  onSaveInput: () => void;
-  onWheelEnd: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
-  onDoubleTap: () => void;
-};
-
-function EditableTimeWheel({
-  value,
-  loopedOptions,
-  scrollRef,
-  isEditing,
-  inputValue,
-  onInputChange,
-  onSaveInput,
-  onWheelEnd,
-  onDoubleTap,
-}: EditableTimeWheelProps) {
-  const lastTapRef = useRef(0);
-
-  const handleTap = () => {
-    const now = Date.now();
-    if (now - lastTapRef.current < 300) {
-      onDoubleTap();
-    }
-    lastTapRef.current = now;
-  };
-
-  if (isEditing) {
-    return (
-      <View style={styles.manualTimeInputWrap}>
-        <TextInput
-          style={styles.manualTimeInput}
-          value={inputValue}
-          onChangeText={onInputChange}
-          keyboardType="numeric"
-          maxLength={2}
-          autoFocus
-          onBlur={onSaveInput}
-          onSubmitEditing={onSaveInput}
-        />
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.timeWheelContainer}>
-      <ScrollView
-        ref={scrollRef}
-        style={styles.timeWheel}
-        contentContainerStyle={styles.wheelScrollContent}
-        showsVerticalScrollIndicator={false}
-        snapToInterval={ITEM_HEIGHT}
-        decelerationRate="fast"
-        bounces={false}
-        nestedScrollEnabled
-        onMomentumScrollEnd={onWheelEnd}
-      >
-        {loopedOptions.map((item, index) => (
-          <TouchableOpacity
-            key={`${item}-${index}`}
-            activeOpacity={1}
-            onPress={handleTap}
-            style={styles.wheelItem}
-          >
-            <Text
-              style={[
-                styles.wheelText,
-                item === value && styles.wheelTextSelected,
-              ]}
-            >
-              {item}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
-  );
 }
 
 export default function FeedingAlarmScreen() {
