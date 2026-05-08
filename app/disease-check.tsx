@@ -59,7 +59,7 @@ export default function DiseaseCheckScreen() {
     from?: string;
     returnTo?: string;
     selectedDiseases?: string;
-    editIndex?: string;
+    profileId?: string;
   }>();
 
   const isProfileEdit = params?.returnTo === "profileEdit";
@@ -119,15 +119,15 @@ export default function DiseaseCheckScreen() {
             typeof params?.selectedDiseases === "string"
               ? params.selectedDiseases
               : "[]",
-          editIndex:
-            typeof params?.editIndex === "string" ? params.editIndex : "",
+          profileId:
+            typeof params?.profileId === "string" ? params.profileId : "",
         },
       } as any);
       return;
     }
 
     router.replace("/profile" as any);
-  }, [params?.returnTo, params?.selectedDiseases, params?.editIndex, router]);
+  }, [params?.returnTo, params?.selectedDiseases, params?.profileId, router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -228,8 +228,8 @@ export default function DiseaseCheckScreen() {
           params: {
             fromDiseaseEdit: "true",
             selectedDiseases: JSON.stringify(selectedDiseases),
-            editIndex:
-              typeof params?.editIndex === "string" ? params.editIndex : "",
+            profileId:
+              typeof params?.profileId === "string" ? params.profileId : "",
           },
         } as any);
         return;

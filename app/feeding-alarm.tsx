@@ -253,7 +253,6 @@ export default function FeedingAlarmScreen() {
 
           const alarmsKey = storageKeys.feedingAlarms(email, petId);
           const foodKey = storageKeys.savedFoods(email, petId);
-          console.log("알람에서 읽는 키:", foodKey);
 
           const savedAlarms = await AsyncStorage.getItem(alarmsKey);
           const savedFoods = await AsyncStorage.getItem(foodKey);

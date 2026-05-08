@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { storageKeys } from "../utils/storageKeys";
 
 const GO_SERVER_URL =
   "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
@@ -65,7 +66,7 @@ export default function SignupScreen() {
   useEffect(() => {
     const loadUsers = async () => {
       try {
-        const savedUsers = await AsyncStorage.getItem("users");
+        const savedUsers = await AsyncStorage.getItem(storageKeys.users);
         const parsedUsers: User[] = savedUsers ? JSON.parse(savedUsers) : [];
         setUsers(parsedUsers);
       } catch (error) {
@@ -299,13 +300,18 @@ export default function SignupScreen() {
       console.log("회원가입 응답 상태:", registerResponse.status);
 
       const responseText = await registerResponse.text();
-      console.log("회원가입 응답 text:", responseText);
-
-      const serverUser = responseText ? JSON.parse(responseText) : null;
 
       if (!registerResponse.ok) {
-        console.log("회원가입 실패:", responseText);
-        Alert.alert("오류", responseText);
+        Alert.alert("오류", responseText || "회원가입에 실패했습니다.");
+        return;
+      }
+
+      let serverUser = null;
+
+      try {
+        serverUser = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        Alert.alert("오류", "서버 응답을 처리하지 못했습니다.");
         return;
       }
 
@@ -329,14 +335,17 @@ export default function SignupScreen() {
       };
 
       // 로컬에 저장
-      const savedUsers = await AsyncStorage.getItem("users");
+      const savedUsers = await AsyncStorage.getItem(storageKeys.users);
       const parsedUsers: User[] = savedUsers ? JSON.parse(savedUsers) : [];
       const updatedUsers = [...parsedUsers, newUser];
-      await AsyncStorage.setItem("users", JSON.stringify(updatedUsers));
+      await AsyncStorage.setItem(
+        storageKeys.users,
+        JSON.stringify(updatedUsers),
+      );
 
       // 서버 user_id를 loggedInUser에 저장
       await AsyncStorage.setItem(
-        "loggedInUser",
+        storageKeys.loggedInUser,
         JSON.stringify({
           id: trimmedId,
           email: trimmedEmail,

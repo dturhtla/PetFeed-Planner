@@ -16,6 +16,7 @@ import { storageKeys } from "../utils/storageKeys";
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
 type ProfileData = {
+  id?: string;
   name?: string;
   age?: string;
   weight?: string;
@@ -32,6 +33,18 @@ type LoggedInUser = {
   serverUserId?: number;
 };
 
+const parseAgeToMonths = (age?: string) => {
+  if (!age) return 0;
+
+  const yearMatch = age.match(/(\d+)\s*년/);
+  const monthMatch = age.match(/(\d+)\s*개월/);
+
+  const years = yearMatch ? Number(yearMatch[1]) : 0;
+  const months = monthMatch ? Number(monthMatch[1]) : 0;
+
+  return years * 12 + months;
+};
+
 const getGenderValue = (gender?: string) => {
   if (gender?.includes("남")) return "M";
   if (gender?.includes("여")) return "F";
@@ -39,14 +52,14 @@ const getGenderValue = (gender?: string) => {
 };
 
 const diseaseMap: Record<string, string> = {
-  신장질환: "kidney_disease",
-  심장질환: "heart_disease",
+  "신장 질환": "kidney_disease",
+  "심장 질환": "heart_disease",
   당뇨: "diabetes",
   췌장염: "pancreatitis",
   관절염: "arthritis",
-  갑상선기능저하증: "hypothyroidism",
-  갑상선기능항진증: "hyperthyroidism",
-  비뇨기질환: "urinary_disease",
+  "갑상선 기능 저하증": "hypothyroidism",
+  "갑상선 기능 항진증": "hyperthyroidism",
+  "요로 질환": "urinary_disease",
   없음: "none",
 };
 
@@ -64,11 +77,12 @@ const show = (msg: string) => {
 
 export default function ProfileCompleteScreen() {
   const [profiles, setProfiles] = useState<ProfileData[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isFormValid = profiles.length > 0;
 
   const loadProfiles = useCallback(async () => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
       const parsedUser: LoggedInUser | null = savedUser
         ? JSON.parse(savedUser)
         : null;
@@ -85,8 +99,7 @@ export default function ProfileCompleteScreen() {
         : [];
 
       setProfiles(parsedProfiles);
-    } catch (error) {
-      console.log("loadProfiles error:", error);
+    } catch {
       show("프로필 정보를 불러오는 중 문제가 발생했어요.");
     }
   }, []);
@@ -99,7 +112,7 @@ export default function ProfileCompleteScreen() {
 
   const handleAddProfile = async () => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
       const parsedUser: LoggedInUser | null = savedUser
         ? JSON.parse(savedUser)
         : null;
@@ -130,8 +143,11 @@ export default function ProfileCompleteScreen() {
   };
 
   const handleSaveProfile = async () => {
+    if (isSubmitting) return;
+
+    setIsSubmitting(true);
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
       const parsedUser: LoggedInUser | null = savedUser
         ? JSON.parse(savedUser)
         : null;
@@ -160,7 +176,7 @@ export default function ProfileCompleteScreen() {
         const petData = {
           user_id: Number(parsedUser.serverUserId),
           name: profile.name || "",
-          age: Number(profile.age) || 0,
+          age: parseAgeToMonths(profile.age),
           species: profile.petType === "고양이" ? "Cat" : "Dog",
           breed: "none",
           gender: getGenderValue(profile.gender),
@@ -170,7 +186,7 @@ export default function ProfileCompleteScreen() {
           health_status: getHealthStatusValue(profile.diseases),
         };
 
-        const response = await fetch(`${API_BASE_URL}/pets`, {
+        const response = await fetch(`${API_BASE_URL}/api/v1/pets`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -180,8 +196,6 @@ export default function ProfileCompleteScreen() {
         });
 
         const responseText = await response.text();
-        console.log("pets response status:", response.status);
-        console.log("pets response text:", responseText);
 
         if (!response.ok) {
           show("일부 반려동물 등록 실패");
@@ -190,12 +204,13 @@ export default function ProfileCompleteScreen() {
         }
 
         const data = responseText ? JSON.parse(responseText) : null;
-        console.log("반려동물 등록 성공:", data);
+        console.log("반려동물 등록되었습니다.:", data);
       }
 
       if (isAllSuccess) {
-        storageKeys.profileCompleted(email);
-        storageKeys.petProfileFlowMode(email);
+        await AsyncStorage.setItem(storageKeys.profileCompleted(email), "true");
+
+        await AsyncStorage.removeItem(storageKeys.petProfileFlowMode(email));
 
         show("프로필이 저장되었습니다");
 
@@ -207,6 +222,8 @@ export default function ProfileCompleteScreen() {
     } catch (error) {
       console.log("profile-complete handleSaveProfile error:", error);
       show("서버 연결 오류가 발생했습니다");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -235,8 +252,8 @@ export default function ProfileCompleteScreen() {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>프로필</Text>
 
-        {profiles.map((profile, index) => (
-          <View key={index} style={styles.card}>
+        {profiles.map((profile) => (
+          <View key={profile.id ?? profile.name} style={styles.card}>
             <View style={styles.avatar}>
               {renderProfileIcon(profile.petType)}
             </View>
@@ -253,11 +270,16 @@ export default function ProfileCompleteScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.doneButton, !isFormValid && styles.buttonDisabled]}
+          style={[
+            styles.doneButton,
+            (!isFormValid || isSubmitting) && styles.buttonDisabled,
+          ]}
           onPress={handleSaveProfile}
-          disabled={!isFormValid}
+          disabled={!isFormValid || isSubmitting}
         >
-          <Text style={styles.doneButtonText}>프로필 저장</Text>
+          <Text style={styles.doneButtonText}>
+            {isSubmitting ? "저장 중..." : "프로필 저장"}
+          </Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

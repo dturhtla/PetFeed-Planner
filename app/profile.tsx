@@ -28,6 +28,7 @@ type LoggedInUser = {
   id: string;
   email: string;
   password: string;
+  serverUserId?: number;
 };
 
 type ProfileData = {
@@ -55,6 +56,44 @@ const show = (msg: string) => {
   ToastAndroid.show(msg, ToastAndroid.SHORT);
 };
 
+const parseAgeToMonths = (age?: string) => {
+  if (!age) return 0;
+
+  const yearMatch = age.match(/(\d+)\s*년/);
+  const monthMatch = age.match(/(\d+)\s*개월/);
+
+  const years = yearMatch ? Number(yearMatch[1]) : 0;
+  const months = monthMatch ? Number(monthMatch[1]) : 0;
+
+  return years * 12 + months;
+};
+
+const getGenderValue = (gender?: string) => {
+  if (gender?.includes("남")) return "M";
+  if (gender?.includes("여")) return "F";
+  return "U";
+};
+
+const diseaseMap: Record<string, string> = {
+  "신장 질환": "kidney_disease",
+  "심장 질환": "heart_disease",
+  당뇨: "diabetes",
+  췌장염: "pancreatitis",
+  관절염: "arthritis",
+  "갑상선 기능 저하증": "hypothyroidism",
+  "갑상선 기능 항진증": "hyperthyroidism",
+  "요로 질환": "urinary_disease",
+  없음: "none",
+};
+
+const getHealthStatusValue = (diseases?: string[]) => {
+  if (!diseases || diseases.length === 0) return "none";
+
+  const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
+
+  return mapped[0] || "none";
+};
+
 const FIRST_BOX_HEIGHT = 64;
 const BOX_HEIGHT = 56;
 const NAME_MAX_LENGTH = 20;
@@ -64,6 +103,8 @@ const MONTH_OPTIONS = [
   "-",
   ...Array.from({ length: 11 }, (_, i) => String(i + 1)),
 ];
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -103,11 +144,9 @@ export default function ProfileScreen() {
     return params?.fromDiseaseEdit === "true";
   }, [params?.fromDiseaseEdit]);
 
-  const returnedEditIndex = useMemo(() => {
-    return typeof params?.editIndex === "string"
-      ? Number(params.editIndex)
-      : null;
-  }, [params?.editIndex]);
+  const returnedProfileId = useMemo(() => {
+    return typeof params?.profileId === "string" ? params.profileId : null;
+  }, [params?.profileId]);
 
   const [isLoaded, setIsLoaded] = useState(false);
   const [userEmail, setUserEmail] = useState("");
@@ -322,7 +361,7 @@ export default function ProfileScreen() {
 
   const loadProfile = useCallback(async () => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
 
       if (!savedUser) {
         router.replace("/" as any);
@@ -392,8 +431,8 @@ export default function ProfileScreen() {
 
       if (returnedFromBcsEdit || returnedFromDiseaseEdit) {
         const editingProfile =
-          returnedEditIndex !== null && parsedProfiles[returnedEditIndex]
-            ? parsedProfiles[returnedEditIndex]
+          returnedProfileId !== null
+            ? parsedProfiles.find((profile) => profile.id === returnedProfileId)
             : parsedDraft || parsedProfile;
 
         applyProfileData(editingProfile || undefined);
@@ -432,7 +471,7 @@ export default function ProfileScreen() {
     forceInputMode,
     fromHomeManage,
     requestedEntryMode,
-    returnedEditIndex,
+    returnedProfileId,
     returnedFromBcsEdit,
     returnedFromDiseaseEdit,
     returnedSelectedBcs,
@@ -534,8 +573,7 @@ export default function ProfileScreen() {
           returnTo: "profileEdit",
           selectedBcs: bcs,
           petType,
-          editIndex:
-            selectedProfileId !== null ? String(selectedProfileId) : "",
+          profileId: selectedProfileId !== null ? selectedProfileId : "",
           petName: name,
         },
       } as any);
@@ -563,11 +601,13 @@ export default function ProfileScreen() {
       await saveDraft();
 
       router.push({
+        pathname: "/disease-check",
         params: {
           mode: "edit",
           from: "profile",
           returnTo: "profileEdit",
           selectedDiseases: JSON.stringify(diseases),
+          profileId: selectedProfileId ?? "",
         },
       } as any);
     } catch (error) {
@@ -578,6 +618,8 @@ export default function ProfileScreen() {
 
   const handleSave = async () => {
     if (isSavingProfile) return;
+
+    setIsSavingProfile(true);
 
     try {
       if (!userEmail) {
@@ -602,6 +644,53 @@ export default function ProfileScreen() {
         bcs,
         diseases,
       };
+
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
+      const parsedUser: LoggedInUser | null = savedUser
+        ? JSON.parse(savedUser)
+        : null;
+
+      if (!parsedUser?.serverUserId) {
+        show("로그인 정보가 없습니다. 다시 로그인해주세요.");
+        return;
+      }
+
+      if (!API_BASE_URL) {
+        show("서버 주소가 설정되지 않았습니다.");
+        return;
+      }
+
+      const petData = {
+        user_id: Number(parsedUser.serverUserId),
+        name: finalProfile.name,
+        age: parseAgeToMonths(finalProfile.age),
+        species: finalProfile.petType === "고양이" ? "Cat" : "Dog",
+        breed: "none",
+        gender: getGenderValue(finalProfile.gender),
+        current_weight: Number(finalProfile.weight) || 0,
+        bcs: finalProfile.bcs || "none",
+        diseases: finalProfile.diseases || [],
+        health_status: getHealthStatusValue(finalProfile.diseases),
+      };
+
+      const response = await fetch(`${API_BASE_URL}/api/v1/pets`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify(petData),
+      });
+
+      const responseText = await response.text();
+
+      console.log("pet register status:", response.status);
+      console.log("pet register response:", responseText);
+
+      if (!response.ok) {
+        show("서버에 반려동물 등록 실패");
+        return;
+      }
 
       const updatedProfiles = [...profiles];
 

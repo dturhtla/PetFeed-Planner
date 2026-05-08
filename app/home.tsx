@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
+import { storageKeys } from "../utils/storageKeys";
 type Pet = {
   id: string;
   name: string;
@@ -28,8 +28,6 @@ const menuList = [
 ];
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
-
-const getSelectedPetKey = (email: string) => `selectedPetId_${email}`;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -85,7 +83,7 @@ export default function HomeScreen() {
       }
 
       const petsResponse = await fetch(
-        `${API_BASE_URL}/users/${serverUserId}/pets`,
+        `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
         {
           headers: {
             "ngrok-skip-browser-warning": "true",
@@ -93,10 +91,7 @@ export default function HomeScreen() {
         },
       );
 
-      console.log("home pets 응답 상태:", petsResponse.status);
-
       if (!petsResponse.ok) {
-        console.log("home pets 에러:", await petsResponse.text());
         setPets([]);
         setSelectedPetId(null);
         ToastAndroid.show(
@@ -109,15 +104,13 @@ export default function HomeScreen() {
       let petsResult;
       try {
         petsResult = await petsResponse.json();
-      } catch (e) {
-        console.log("json parse error:", e);
+      } catch {
         ToastAndroid.show(
           "반려동물 데이터를 처리하는 중 문제가 발생했어요.",
           ToastAndroid.SHORT,
         );
         return;
       }
-      console.log("home pets 결과:", JSON.stringify(petsResult));
       const serverPets = Array.isArray(petsResult)
         ? petsResult
         : petsResult?.pets || [];
@@ -146,7 +139,9 @@ export default function HomeScreen() {
         return;
       }
 
-      const savedPetId = await AsyncStorage.getItem(getSelectedPetKey(email));
+      const savedPetId = await AsyncStorage.getItem(
+        storageKeys.selectedPetId(email),
+      );
 
       if (savedPetId && loadedPets.some((pet) => pet.id === savedPetId)) {
         setSelectedPetId(savedPetId);
@@ -155,7 +150,7 @@ export default function HomeScreen() {
 
       const firstPetId = loadedPets[0].id;
       setSelectedPetId(firstPetId);
-      await AsyncStorage.setItem(getSelectedPetKey(email), firstPetId);
+      await AsyncStorage.setItem(storageKeys.selectedPetId(email), firstPetId);
     } catch (error) {
       console.log("loadSelectedPet error:", error);
       ToastAndroid.show(
@@ -219,7 +214,6 @@ export default function HomeScreen() {
   };
 
   const handleSelectPet = async (pet: Pet) => {
-    console.log("선택한 pet id:", pet.id);
     try {
       const savedUser = await AsyncStorage.getItem("loggedInUser");
       if (!savedUser) return;
@@ -228,7 +222,7 @@ export default function HomeScreen() {
       const email = parsedUser.email;
 
       setSelectedPetId(pet.id);
-      await AsyncStorage.setItem(getSelectedPetKey(email), pet.id);
+      await AsyncStorage.setItem(storageKeys.selectedPetId(email), pet.id);
 
       setPetSheetVisible(false);
       ToastAndroid.show(`${pet.name}으로 변경되었습니다`, ToastAndroid.SHORT);
