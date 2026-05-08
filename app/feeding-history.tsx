@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
+import { to24Hour } from "../utils/timeUtils";
 
 type PetProfileItem = {
   id: string;
@@ -47,19 +48,8 @@ type AlarmItem = {
   enabled: boolean;
 };
 
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
-function to24Hour(period: "오전" | "오후", hour: string) {
-  let h = Number(hour);
-
-  if (period === "오전") {
-    if (h === 12) h = 0;
-  } else {
-    if (h !== 12) h += 12;
-  }
-
-  return h;
-}
 
 function getAlarmSortValue(alarm: AlarmItem) {
   return to24Hour(alarm.period, alarm.hour) * 60 + Number(alarm.minute);
@@ -149,8 +139,13 @@ export default function FeedingHistoryScreen() {
       let loadedProfiles: PetProfileItem[] = [];
 
       if (serverUserId) {
+        if (!API_BASE_URL) {
+          show("서버 주소가 설정되지 않았습니다.");
+          return;
+        }
+
         const petsResponse = await fetch(
-          `https://preirrigational-concha-prealphabetically.ngrok-free.dev/api/v1/users/${serverUserId}/pets`,
+          `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
           {
             headers: {
               "ngrok-skip-browser-warning": "true",
@@ -448,6 +443,14 @@ export default function FeedingHistoryScreen() {
     setSelectedDate(dateKey);
   };
 
+  const handleSelectPet = async (pet: PetProfileItem) => {
+    setSelectedPetId(pet.id);
+
+    if (userEmail) {
+      await AsyncStorage.setItem(storageKeys.selectedPetId(userEmail), pet.id);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.header}>
@@ -484,7 +487,7 @@ export default function FeedingHistoryScreen() {
               <TouchableOpacity
                 style={[styles.petChip, isSelected && styles.petChipSelected]}
                 activeOpacity={0.85}
-                onPress={() => setSelectedPetId(item.id)}
+                onPress={() => handleSelectPet(item)}
               >
                 <View style={styles.petIconCircle}>
                   {renderPetIcon(item.petType, 14)}

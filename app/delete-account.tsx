@@ -13,7 +13,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
+import { storageKeys } from "../utils/storageKeys";
 type User = {
   id: string;
   email: string;
@@ -41,7 +41,9 @@ export default function DeleteAccountScreen() {
     setIsDeleting(true);
 
     try {
-      const savedLoggedInUser = await AsyncStorage.getItem("loggedInUser");
+      const savedLoggedInUser = await AsyncStorage.getItem(
+        storageKeys.loggedInUser,
+      );
 
       if (!savedLoggedInUser) {
         Alert.alert("오류", "로그인 정보가 없습니다.", [
@@ -79,21 +81,44 @@ export default function DeleteAccountScreen() {
 
       for (let i = 0; i < parsedProfiles.length; i++) {
         const petId = String(parsedProfiles[i].id ?? i + 1);
+
         await AsyncStorage.removeItem(
-          `feeding_alarms_${currentUser.email}_${petId}`,
+          storageKeys.feedingAlarms(currentUser.email, petId),
+        );
+
+        await AsyncStorage.removeItem(
+          storageKeys.savedFoods(currentUser.email, petId),
         );
       }
 
       // 혹시 예전 구조/단일 프로필 구조에서 남아 있을 수 있는 key도 같이 제거
       await AsyncStorage.removeItem(`feeding_alarms_${currentUser.email}`);
 
-      await AsyncStorage.removeItem("loggedInUser");
-      await AsyncStorage.removeItem(`petProfile_${currentUser.email}`);
-      await AsyncStorage.removeItem(`petProfileDraft_${currentUser.email}`);
-      await AsyncStorage.removeItem(`profileCompleted_${currentUser.email}`);
-      await AsyncStorage.removeItem(`petProfiles_${currentUser.email}`);
-      await AsyncStorage.removeItem(`petProfileFlowMode_${currentUser.email}`);
-      await AsyncStorage.removeItem(`feedingRecords_${currentUser.email}`);
+      await AsyncStorage.removeItem(storageKeys.loggedInUser);
+
+      await AsyncStorage.removeItem(storageKeys.petProfile(currentUser.email));
+
+      await AsyncStorage.removeItem(
+        storageKeys.petProfileDraft(currentUser.email),
+      );
+
+      await AsyncStorage.removeItem(
+        storageKeys.profileCompleted(currentUser.email),
+      );
+
+      await AsyncStorage.removeItem(storageKeys.petProfiles(currentUser.email));
+
+      await AsyncStorage.removeItem(
+        storageKeys.petProfileFlowMode(currentUser.email),
+      );
+
+      await AsyncStorage.removeItem(
+        storageKeys.feedingRecords(currentUser.email),
+      );
+
+      await AsyncStorage.removeItem(
+        storageKeys.selectedPetId(currentUser.email),
+      );
 
       Alert.alert("탈퇴 완료", "계정이 삭제되었습니다.", [
         {
@@ -111,8 +136,9 @@ export default function DeleteAccountScreen() {
 
   const handleDeleteAccount = async () => {
     try {
-      const savedLoggedInUser = await AsyncStorage.getItem("loggedInUser");
-
+      const savedLoggedInUser = await AsyncStorage.getItem(
+        storageKeys.loggedInUser,
+      );
       if (!savedLoggedInUser) {
         Alert.alert("오류", "로그인 정보가 없습니다.", [
           {

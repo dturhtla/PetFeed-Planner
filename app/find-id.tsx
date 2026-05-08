@@ -11,6 +11,7 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { storageKeys } from "../utils/storageKeys";
 
 const BOX_HEIGHT = 60;
 
@@ -33,8 +34,6 @@ export default function FindIdScreen() {
 
   const handleFindId = async () => {
     try {
-      const trimmedEmail = email.trim().toLowerCase();
-
       if (!trimmedEmail) {
         Alert.alert("아이디 찾기", "이메일을 입력해주세요.");
         return;
@@ -45,7 +44,7 @@ export default function FindIdScreen() {
         return;
       }
 
-      const savedUsers = await AsyncStorage.getItem("users");
+      const savedUsers = await AsyncStorage.getItem(storageKeys.users);
       const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
 
       const foundUser = users.find(

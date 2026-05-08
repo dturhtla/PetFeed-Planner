@@ -168,15 +168,15 @@ export default function BcsCheckScreen() {
           fromBcsEdit: "true",
           selectedBcs:
             typeof params?.selectedBcs === "string" ? params.selectedBcs : "",
-          editIndex:
-            typeof params?.editIndex === "string" ? params.editIndex : "",
+          profileId:
+            typeof params?.profileId === "string" ? params.profileId : "",
         },
       } as any);
       return;
     }
 
     router.replace("/profile" as any);
-  }, [isProfileEdit, params?.selectedBcs, params?.editIndex, router]);
+  }, [isProfileEdit, params?.selectedBcs, params?.profileId, router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -208,7 +208,6 @@ export default function BcsCheckScreen() {
       setIsSaving(true);
 
       const draftKey = `petProfileDraft_${userEmail}`;
-      const profileKey = `petProfile_${userEmail}`;
       const flowModeKey = `petProfileFlowMode_${userEmail}`;
 
       const savedDraft = await AsyncStorage.getItem(draftKey);
@@ -230,8 +229,8 @@ export default function BcsCheckScreen() {
           params: {
             selectedBcs,
             fromBcsEdit: "true",
-            editIndex:
-              typeof params?.editIndex === "string" ? params.editIndex : "",
+            profileId:
+              typeof params?.profileId === "string" ? params.profileId : "",
           },
         } as any);
         return;
@@ -251,7 +250,6 @@ export default function BcsCheckScreen() {
       }
 
       await AsyncStorage.setItem(draftKey, JSON.stringify(updatedProfile));
-      await AsyncStorage.setItem(profileKey, JSON.stringify(updatedProfile));
       await AsyncStorage.setItem(flowModeKey, flowMode);
 
       router.push({

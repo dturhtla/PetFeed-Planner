@@ -1,5 +1,6 @@
 export const storageKeys = {
   loggedInUser: "loggedInUser",
+  users: "users",
 
   petProfileDraft: (email: string) => `petProfileDraft_${email}`,
   petProfile: (email: string) => `petProfile_${email}`,

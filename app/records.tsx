@@ -25,6 +25,7 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
+import { to24Hour } from "../utils/timeUtils";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -82,18 +83,6 @@ function createInitialTime() {
   date.setSeconds(0);
   date.setMilliseconds(0);
   return date;
-}
-
-function to24Hour(period: "오전" | "오후", hour: string) {
-  let h = Number(hour);
-
-  if (period === "오전") {
-    if (h === 12) h = 0;
-  } else {
-    if (h !== 12) h += 12;
-  }
-
-  return h;
 }
 
 function formatAlarmDisplayTime(alarm: AlarmItem) {
@@ -357,6 +346,10 @@ export default function RecordsScreen() {
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
       const serverUserId = parsedUser.serverUserId;
+      if (!serverUserId) {
+        show("로그인 정보가 없습니다. 다시 로그인해주세요.");
+        return;
+      }
       setUserEmail(email);
 
       // 1. 서버에서 pets 불러오기
@@ -366,7 +359,7 @@ export default function RecordsScreen() {
       }
 
       const petsResponse = await fetch(
-        `${API_BASE_URL}/users/${serverUserId}/pets`,
+        `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
         { headers: { "ngrok-skip-browser-warning": "true" } },
       );
 

@@ -14,6 +14,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { storageKeys } from "../utils/storageKeys";
 
 type User = {
   id: string;
@@ -225,7 +226,7 @@ export default function FindPasswordScreen() {
         return;
       }
 
-      const savedUsers = await AsyncStorage.getItem("users");
+      const savedUsers = await AsyncStorage.getItem(storageKeys.users);
       const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
 
       const targetIndex = users.findIndex(
@@ -248,8 +249,8 @@ export default function FindPasswordScreen() {
       }
 
       users[targetIndex].password = newPassword;
-      await AsyncStorage.setItem("users", JSON.stringify(users));
-      await AsyncStorage.removeItem("loggedInUser");
+      await AsyncStorage.setItem(storageKeys.users, JSON.stringify(users));
+      await AsyncStorage.removeItem(storageKeys.loggedInUser);
 
       Alert.alert(
         "비밀번호 재설정 완료",
