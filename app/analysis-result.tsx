@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const API_URL = "https://whoopee-untying-angler.ngrok-free.dev";
+const API_URL = "https://soulful-ouida-penetrably.ngrok-free.dev";
 const GO_SERVER_URL =
   "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
 
@@ -91,6 +91,24 @@ const bcsToNumber = (bcs: string): number => {
     비만: 9,
   };
   return bcsMap[bcs] || 5;
+};
+
+const diseaseMapReverse: Record<string, string> = {
+  kidney_disease: "신장질환",
+  heart_disease: "심장질환",
+  diabetes: "당뇨",
+  pancreatitis: "췌장염",
+  arthritis: "관절염",
+  hypothyroidism: "갑상선기능저하증",
+  hyperthyroidism: "갑상선기능항진증",
+  urinary_disease: "비뇨기질환",
+  none: "없음",
+};
+
+const mapDiseasesToKorean = (healthStatus: string): string[] => {
+  if (!healthStatus || healthStatus === "none") return ["없음"];
+  const korean = diseaseMapReverse[healthStatus];
+  return korean ? [korean] : ["없음"];
 };
 
 export default function AnalysisResultScreen() {
@@ -181,13 +199,6 @@ export default function AnalysisResultScreen() {
         return;
       }
 
-      console.log("선택된 반려동물:", JSON.stringify(selectedPet));
-
-      if (!selectedPet) {
-        setError("반려동물 프로필을 찾을 수 없어요.");
-        return;
-      }
-
       const serverPetId = String(selectedPet.pet_id ?? selectedPet.id);
 
       const savedProfiles = await AsyncStorage.getItem(`petProfiles_${email}`);
@@ -200,7 +211,7 @@ export default function AnalysisResultScreen() {
       const profile: ProfileData = {
         name: selectedPet.name || localProfile?.name || "",
         age: selectedPet.age || localProfile?.age || "",
-        weight: String(selectedPet.weight || localProfile?.weight || "0"),
+        weight: String(selectedPet.weight || selectedPet.current_weight || localProfile?.weight || "0"),
         gender: selectedPet.gender || localProfile?.gender || "",
         petType:
           selectedPet.species === "Dog"
@@ -212,9 +223,7 @@ export default function AnalysisResultScreen() {
         diseases:
           selectedPet.diseases ||
           localProfile?.diseases ||
-          (selectedPet.health_status && selectedPet.health_status !== "none"
-            ? [selectedPet.health_status]
-            : []),
+          mapDiseasesToKorean(selectedPet.health_status || "none"),
       };
       console.log("서버에서 프로필 가져옴:", profile);
 
@@ -230,13 +239,6 @@ export default function AnalysisResultScreen() {
       console.log("lifeStage:", lifeStage);
       console.log("imageUri:", imageUri);
 
-      const apiSpecies =
-        profile.petType === "강아지"
-          ? "Dog"
-          : profile.petType === "고양이"
-            ? "Cat"
-            : profile.petType;
-
       const queryParams = new URLSearchParams({
         pet_name: profile.name || "",
         species: profile.petType || "",
@@ -250,7 +252,6 @@ export default function AnalysisResultScreen() {
       });
 
       const formData = new FormData();
-
       formData.append("image", {
         uri: imageUri,
         type: "image/jpeg",
@@ -258,9 +259,7 @@ export default function AnalysisResultScreen() {
       } as any);
 
       const requestUrl = `${API_URL}/food/analyze?${queryParams.toString()}`;
-
       console.log("현재 API_URL:", API_URL);
-
       console.log("API 호출 시작:", requestUrl);
 
       const controller = new AbortController();
@@ -397,9 +396,6 @@ export default function AnalysisResultScreen() {
     }
   }, [imageUri]);
 
-  const getFoodsKey = (email: string, petId: string) =>
-    `savedFoods_${email}_${petId}`;
-
   const handleSaveFoodToList = async () => {
     if (!foodInfo || !feeding) return;
 
@@ -413,14 +409,11 @@ export default function AnalysisResultScreen() {
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
 
-      // 서버 petId 그대로 사용
       const savedPetId = await AsyncStorage.getItem(`selectedPetId_${email}`);
       if (!savedPetId) {
         ToastAndroid.show("반려동물을 선택해주세요.", ToastAndroid.SHORT);
         return;
       }
-
-      console.log("저장할 키:", `savedFoods_${email}_${savedPetId}`);
 
       const savedFoods = await AsyncStorage.getItem(
         `savedFoods_${email}_${savedPetId}`,
@@ -428,9 +421,6 @@ export default function AnalysisResultScreen() {
       const foodList = savedFoods ? JSON.parse(savedFoods) : [];
 
       const foodName = foodInfo.product_name || foodInfo.brand || "분석된 사료";
-
-      console.log("현재 저장된 목록:", JSON.stringify(foodList));
-      console.log("비교할 이름:", foodName);
 
       const isDuplicate = foodList.some((food: any) => food.name === foodName);
 
@@ -595,6 +585,7 @@ export default function AnalysisResultScreen() {
             <Text style={styles.desc}>• 위험 성분이 없습니다.</Text>
           )}
         </View>
+
         <TouchableOpacity
           style={styles.saveFoodButton}
           onPress={handleSaveFoodToList}
@@ -649,14 +640,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.6,
     borderBottomColor: "#E4E8E6",
   },
-  recommendText: {
-    marginTop: 12,
-    marginBottom: 12,
-    fontSize: 15,
-    fontWeight: "800",
-    color: "#2F6B57",
-  },
-
+  label: { fontSize: 14, color: "#333" },
+  value: { fontSize: 14, fontWeight: "700", color: "#2F6B57" },
+  desc: { fontSize: 13, color: "#555", lineHeight: 21, marginBottom: 6 },
   saveFoodButton: {
     marginTop: 10,
     backgroundColor: "#2F6B57",
@@ -664,14 +650,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     alignItems: "center",
   },
-
   saveFoodButtonText: {
     color: "#FFFFFF",
     fontSize: 15,
     fontWeight: "800",
   },
-
-  label: { fontSize: 14, color: "#333" },
-  value: { fontSize: 14, fontWeight: "700", color: "#2F6B57" },
-  desc: { fontSize: 13, color: "#555", lineHeight: 21, marginBottom: 6 },
 });

@@ -12,6 +12,23 @@ load_dotenv()
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 
+async def generate_with_retry(model, contents, max_retries=3, delay=5):
+    """Gemini API 호출 재시도 로직"""
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents
+            )
+            return response
+        except Exception as e:
+            if "503" in str(e) and attempt < max_retries - 1:
+                print(f"503 에러 발생, {delay}초 후 재시도... ({attempt + 1}/{max_retries})")
+                await asyncio.sleep(delay)
+                continue
+            raise
+
+
 @dataclass
 class FoodAnalysisResult:
     brand: str | None
@@ -62,8 +79,8 @@ async def analyze_food_image(image_b64: str) -> FoodAnalysisResult:
 
     image_bytes = base64.b64decode(image_b64)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
+    response = await generate_with_retry(
+        model="gemini-2.5-flash-lite",
         contents=[
             types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg"),
             prompt
@@ -129,8 +146,8 @@ async def search_product_calories(brand: str, product_name: str) -> float | None
 이 제품의 100g당 칼로리(kcal)를 숫자만 반환해주세요.
 다른 텍스트 없이 숫자만 반환해야 합니다."""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
+    response = await generate_with_retry(
+        model="gemini-2.5-flash-lite",
         contents=prompt
     )
 
@@ -167,8 +184,8 @@ async def search_product_nutrition(brand: str, product_name: str, nutrient: str)
 이 제품의 {nutrient} 함량(%)을 숫자만 반환해주세요.
 다른 텍스트 없이 숫자만 반환해야 합니다."""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
+    response = await generate_with_retry(
+        model="gemini-2.5-flash-lite",
         contents=prompt
     )
 

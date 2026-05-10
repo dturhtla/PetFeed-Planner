@@ -2,7 +2,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from google import genai
-from app.services.food_analyzer import FoodAnalysisResult
+from app.services.food_analyzer import FoodAnalysisResult, generate_with_retry
 
 load_dotenv()
 
@@ -15,8 +15,6 @@ async def search_official_feeding_guide(
     age_years: float
 ) -> float | None:
     """브랜드 공식 권장 급여량 검색"""
-
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
     species_korean = {
         "dog": "강아지", "cat": "고양이"
@@ -33,8 +31,8 @@ async def search_official_feeding_guide(
 모르면 null을 반환해주세요.
 다른 텍스트 없이 숫자 또는 null만 반환해야 합니다."""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
+    response = await generate_with_retry(
+        model="gemini-2.5-flash-lite",
         contents=prompt
     )
 
@@ -126,8 +124,6 @@ async def generate_recommendation_text(
 ) -> str:
     """Gemini로 자연어 급여 추천 코멘트 생성"""
 
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-
     species_korean = {
         "dog": "강아지", "cat": "고양이"
     }
@@ -159,8 +155,8 @@ async def generate_recommendation_text(
 위 정보를 바탕으로 보호자에게 친근한 말투로 급여 가이드를 3~4문장으로 작성해주세요.
 급여 횟수, 주의사항, 물 섭취 팁을 포함해주세요."""
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
+    response = await generate_with_retry(
+        model="gemini-2.5-flash-lite",
         contents=prompt
     )
 
