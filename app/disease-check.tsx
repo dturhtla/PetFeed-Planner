@@ -27,6 +27,7 @@ type LoggedInUser = {
   id: string;
   email: string;
   password: string;
+  serverUserId?: number;
 };
 
 type ProfileData = {
@@ -37,6 +38,58 @@ type ProfileData = {
   petType?: PetType;
   bcs?: BcsLabel;
   diseases?: string[];
+};
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+
+const parseAgeToMonths = (age?: string) => {
+  if (!age) return 0;
+
+  const yearMatch = age.match(/(\d+)\s*년/);
+  const monthMatch = age.match(/(\d+)\s*개월/);
+
+  const years = yearMatch ? Number(yearMatch[1]) : 0;
+  const months = monthMatch ? Number(monthMatch[1]) : 0;
+
+  return years * 12 + months;
+};
+
+const getGenderValue = (gender?: string) => {
+  if (gender?.includes("남")) return "M";
+  if (gender?.includes("여")) return "F";
+  return "U";
+};
+
+const getBcsScore = (bcs?: string) => {
+  const bcsMap: Record<string, number> = {
+    "심한 저체중": 1,
+    저체중: 2,
+    정상: 3,
+    과체중: 4,
+    비만: 5,
+  };
+
+  return bcs ? bcsMap[bcs] || 3 : 3;
+};
+
+const diseaseMap: Record<string, string> = {
+  "신장 질환": "kidney_disease",
+  "심장 질환": "heart_disease",
+  당뇨: "diabetes",
+  췌장염: "pancreatitis",
+  관절염: "arthritis",
+  "갑상선 기능 저하증": "hypothyroidism",
+  "갑상선 기능 항진증": "hyperthyroidism",
+  "요로 질환": "urinary_disease",
+  없음: "none",
+};
+
+const getHealthStatusValue = (diseases?: string[]) => {
+  if (!diseases || diseases.length === 0) return "none";
+
+  const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
+
+  return mapped[0] || "none";
 };
 
 const DISEASE_OPTIONS = [
@@ -198,7 +251,7 @@ export default function DiseaseCheckScreen() {
       const parsedDraft: ProfileData = savedDraft ? JSON.parse(savedDraft) : {};
 
       const baseProfile: ProfileData =
-        Object.keys(parsedProfile).length > 0 ? parsedProfile : parsedDraft;
+        Object.keys(parsedDraft).length > 0 ? parsedDraft : parsedProfile;
 
       if (
         !baseProfile.name ||
@@ -251,6 +304,72 @@ export default function DiseaseCheckScreen() {
         await AsyncStorage.removeItem(flowModeKey);
         router.replace("/profile-complete" as any);
       } else {
+        if (!parsedUser.serverUserId) {
+          show("로그인 정보가 없습니다. 다시 로그인해주세요.");
+          return;
+        }
+
+        if (!API_BASE_URL) {
+          show("서버 주소가 설정되지 않았습니다.");
+          return;
+        }
+
+        const petData = {
+          user_id: Number(parsedUser.serverUserId),
+          name: finalProfile.name || "",
+          age: parseAgeToMonths(finalProfile.age),
+          species: finalProfile.petType === "고양이" ? "Cat" : "Dog",
+          breed: "none",
+          gender: getGenderValue(finalProfile.gender),
+          current_weight: Number(finalProfile.weight) || 0,
+          bcs_score: getBcsScore(finalProfile.bcs),
+          diseases: finalProfile.diseases || [],
+          health_status: getHealthStatusValue(finalProfile.diseases),
+        };
+
+        console.log("disease-check add petData:", petData);
+
+        const response = await fetch(`${API_BASE_URL}/api/v1/pets`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+          body: JSON.stringify(petData),
+        });
+
+        const responseText = await response.text();
+
+        console.log("disease-check pet register status:", response.status);
+        console.log("disease-check pet register response:", responseText);
+
+        if (!response.ok) {
+          show("서버에 반려동물 등록 실패");
+          return;
+        }
+
+        const data = responseText ? JSON.parse(responseText) : null;
+        const serverPetId = data?.pet_id ?? data?.id;
+
+        const updatedProfilesWithServerId = updatedProfiles.map(
+          (profile, index) =>
+            index === updatedProfiles.length - 1
+              ? { ...profile, serverPetId }
+              : profile,
+        );
+
+        await AsyncStorage.setItem(
+          profilesKey,
+          JSON.stringify(updatedProfilesWithServerId),
+        );
+
+        if (serverPetId) {
+          await AsyncStorage.setItem(
+            `selectedPetId_${email}`,
+            String(serverPetId),
+          );
+        }
+
         await AsyncStorage.removeItem(flowModeKey);
         router.replace("/profile" as any);
       }

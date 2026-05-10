@@ -17,6 +17,7 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
 type ProfileData = {
   id?: string;
+  serverPetId?: number;
   name?: string;
   age?: string;
   weight?: string;
@@ -61,6 +62,18 @@ const diseaseMap: Record<string, string> = {
   "갑상선 기능 항진증": "hyperthyroidism",
   "요로 질환": "urinary_disease",
   없음: "none",
+};
+
+const getBcsScore = (bcs?: string) => {
+  const bcsMap: Record<string, number> = {
+    "심한 저체중": 1,
+    저체중: 2,
+    정상: 3,
+    과체중: 4,
+    비만: 5,
+  };
+
+  return bcs ? bcsMap[bcs] || 3 : 3;
 };
 
 const getHealthStatusValue = (diseases?: string[]) => {
@@ -173,6 +186,17 @@ export default function ProfileCompleteScreen() {
       }
 
       for (const profile of profiles) {
+        // profile.tsx에서 이미 서버에 등록된 펫은 중복 등록 방지
+        if (profile.serverPetId) {
+          console.log(
+            "profile-complete: 이미 등록된 펫 skip:",
+            profile.name,
+            "serverPetId:",
+            profile.serverPetId,
+          );
+          continue;
+        }
+
         const petData = {
           user_id: Number(parsedUser.serverUserId),
           name: profile.name || "",
@@ -181,10 +205,12 @@ export default function ProfileCompleteScreen() {
           breed: "none",
           gender: getGenderValue(profile.gender),
           current_weight: Number(profile.weight) || 0,
-          bcs: profile.bcs || "none",
+          bcs_score: getBcsScore(profile.bcs),
           diseases: profile.diseases || [],
           health_status: getHealthStatusValue(profile.diseases),
         };
+
+        console.log("profile-complete save petData:", petData);
 
         const response = await fetch(`${API_BASE_URL}/api/v1/pets`, {
           method: "POST",
@@ -196,6 +222,8 @@ export default function ProfileCompleteScreen() {
         });
 
         const responseText = await response.text();
+        console.log("profile-complete pet register status:", response.status);
+        console.log("profile-complete pet register response:", responseText);
 
         if (!response.ok) {
           show("일부 반려동물 등록 실패");
@@ -204,10 +232,22 @@ export default function ProfileCompleteScreen() {
         }
 
         const data = responseText ? JSON.parse(responseText) : null;
+
+        profile.serverPetId = data?.pet_id ?? data?.id;
+
         console.log("반려동물 등록되었습니다.:", data);
       }
 
       if (isAllSuccess) {
+        const updatedProfiles = [...profiles];
+
+        setProfiles(updatedProfiles);
+
+        await AsyncStorage.setItem(
+          storageKeys.petProfiles(email),
+          JSON.stringify(updatedProfiles),
+        );
+
         await AsyncStorage.setItem(storageKeys.profileCompleted(email), "true");
 
         await AsyncStorage.removeItem(storageKeys.petProfileFlowMode(email));
@@ -277,9 +317,7 @@ export default function ProfileCompleteScreen() {
           onPress={handleSaveProfile}
           disabled={!isFormValid || isSubmitting}
         >
-          <Text style={styles.doneButtonText}>
-            {isSubmitting ? "저장 중..." : "프로필 저장"}
-          </Text>
+          <Text style={styles.doneButtonText}>저장</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

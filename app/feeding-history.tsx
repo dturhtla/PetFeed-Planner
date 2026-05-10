@@ -138,12 +138,7 @@ export default function FeedingHistoryScreen() {
 
       let loadedProfiles: PetProfileItem[] = [];
 
-      if (serverUserId) {
-        if (!API_BASE_URL) {
-          show("서버 주소가 설정되지 않았습니다.");
-          return;
-        }
-
+      if (serverUserId && API_BASE_URL) {
         const petsResponse = await fetch(
           `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
           {
@@ -155,6 +150,7 @@ export default function FeedingHistoryScreen() {
 
         if (petsResponse.ok) {
           const petsResult = await petsResponse.json();
+
           const serverPets = Array.isArray(petsResult)
             ? petsResult
             : petsResult?.pets || [];
@@ -177,14 +173,46 @@ export default function FeedingHistoryScreen() {
         }
       }
 
+      if (loadedProfiles.length === 0) {
+        const savedProfiles = await AsyncStorage.getItem(
+          storageKeys.petProfiles(email),
+        );
+
+        let localProfiles = [];
+
+        try {
+          localProfiles = savedProfiles ? JSON.parse(savedProfiles) : [];
+        } catch {
+          localProfiles = [];
+        }
+
+        loadedProfiles = localProfiles.map((profile: any) => ({
+          id: String(profile.serverPetId ?? profile.id),
+          name: profile.name,
+          petType: profile.petType,
+        }));
+      }
+
       setPetProfiles(loadedProfiles);
+      const savedPetId = await AsyncStorage.getItem(
+        storageKeys.selectedPetId(email),
+      );
 
       const nextSelectedPetId =
         petId && loadedProfiles.some((pet) => pet.id === petId)
           ? petId
-          : loadedProfiles[0]?.id || "";
+          : savedPetId && loadedProfiles.some((pet) => pet.id === savedPetId)
+            ? savedPetId
+            : loadedProfiles[0]?.id || "";
 
       setSelectedPetId(nextSelectedPetId);
+
+      if (nextSelectedPetId) {
+        await AsyncStorage.setItem(
+          storageKeys.selectedPetId(email),
+          nextSelectedPetId,
+        );
+      }
 
       if (savedRecords) {
         const parsedRecords = JSON.parse(savedRecords);
