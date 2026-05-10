@@ -32,7 +32,8 @@ type LoggedInUser = {
 };
 
 type ProfileData = {
-  id: string; // 추가
+  id: string;
+  serverPetId?: number;
   name: string;
   age: string;
   weight: string;
@@ -92,6 +93,18 @@ const getHealthStatusValue = (diseases?: string[]) => {
   const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
 
   return mapped[0] || "none";
+};
+
+const getBcsScore = (bcs?: string) => {
+  const bcsMap: Record<string, number> = {
+    "심한 저체중": 1,
+    저체중: 2,
+    정상: 3,
+    과체중: 4,
+    비만: 5,
+  };
+
+  return bcs ? bcsMap[bcs] || 3 : 3;
 };
 
 const FIRST_BOX_HEIGHT = 64;
@@ -645,6 +658,18 @@ export default function ProfileScreen() {
         diseases,
       };
 
+      const isDuplicateName = profiles.some(
+        (profile) =>
+          profile.id !== selectedProfileId &&
+          profile.name.trim().toLowerCase() ===
+            finalProfile.name.trim().toLowerCase(),
+      );
+
+      if (isDuplicateName) {
+        show("이미 같은 이름의 반려동물이 있어요.");
+        return;
+      }
+
       const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
       const parsedUser: LoggedInUser | null = savedUser
         ? JSON.parse(savedUser)
@@ -668,19 +693,38 @@ export default function ProfileScreen() {
         breed: "none",
         gender: getGenderValue(finalProfile.gender),
         current_weight: Number(finalProfile.weight) || 0,
-        bcs: finalProfile.bcs || "none",
+        bcs_score: getBcsScore(finalProfile.bcs),
         diseases: finalProfile.diseases || [],
         health_status: getHealthStatusValue(finalProfile.diseases),
       };
 
-      const response = await fetch(`${API_BASE_URL}/api/v1/pets`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "ngrok-skip-browser-warning": "true",
-        },
-        body: JSON.stringify(petData),
+      const selectedProfile = profiles.find(
+        (profile) => profile.id === selectedProfileId,
+      );
+
+      const isEditExistingServerPet =
+        selectedProfileId !== null && selectedProfile?.serverPetId;
+
+      console.log("save mode:", {
+        selectedProfileId,
+        selectedProfile,
+        isEditExistingServerPet,
+        petData,
       });
+
+      const response = await fetch(
+        isEditExistingServerPet
+          ? `${API_BASE_URL}/api/v1/pets/${selectedProfile.serverPetId}`
+          : `${API_BASE_URL}/api/v1/pets`,
+        {
+          method: isEditExistingServerPet ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+          body: JSON.stringify(petData),
+        },
+      );
 
       const responseText = await response.text();
 
@@ -688,9 +732,25 @@ export default function ProfileScreen() {
       console.log("pet register response:", responseText);
 
       if (!response.ok) {
-        show("서버에 반려동물 등록 실패");
+        show(
+          isEditExistingServerPet
+            ? "서버에 반려동물 수정 실패"
+            : "서버에 반려동물 등록 실패",
+        );
         return;
       }
+
+      const responseData = responseText ? JSON.parse(responseText) : null;
+
+      const savedServerPetId =
+        selectedProfile?.serverPetId ??
+        responseData?.pet_id ??
+        responseData?.id;
+
+      const finalProfileWithServerId: ProfileData = {
+        ...finalProfile,
+        serverPetId: savedServerPetId,
+      };
 
       const updatedProfiles = [...profiles];
 
@@ -700,12 +760,12 @@ export default function ProfileScreen() {
         );
 
         if (targetIndex >= 0) {
-          updatedProfiles[targetIndex] = finalProfile;
+          updatedProfiles[targetIndex] = finalProfileWithServerId;
         } else {
-          updatedProfiles.push(finalProfile);
+          updatedProfiles.push(finalProfileWithServerId);
         }
       } else {
-        updatedProfiles.push(finalProfile);
+        updatedProfiles.push(finalProfileWithServerId);
       }
 
       await AsyncStorage.setItem(
@@ -714,7 +774,7 @@ export default function ProfileScreen() {
       );
       await AsyncStorage.setItem(
         storageKeys.petProfile(userEmail),
-        JSON.stringify(finalProfile),
+        JSON.stringify(finalProfileWithServerId),
       );
       await AsyncStorage.setItem(
         storageKeys.profileCompleted(userEmail),
@@ -729,6 +789,23 @@ export default function ProfileScreen() {
       setErrors({});
 
       show("프로필이 저장되었습니다.");
+
+      // 새 펫 추가(selectedProfileId === null)인 경우:
+      // 이전 화면(profile-complete 또는 home)으로 돌아가서
+      // useFocusEffect가 발동되어 홈/급여기록에도 즉시 반영되게 한다.
+      const isNewPet = selectedProfileId === null;
+      if (isNewPet) {
+        // 새로 등록된 펫을 selectedPetId로 저장해 홈에서 바로 선택되도록 함
+        if (savedServerPetId) {
+          await AsyncStorage.setItem(
+            storageKeys.selectedPetId(userEmail),
+            String(savedServerPetId),
+          );
+        }
+        setTimeout(() => {
+          router.back();
+        }, 300);
+      }
     } catch (error) {
       console.log("handleSave error:", error);
       show("프로필을 저장하는 중 문제가 발생했어요.");
@@ -746,6 +823,27 @@ export default function ProfileScreen() {
         text: "삭제",
         style: "destructive",
         onPress: async () => {
+          const targetProfile = profiles.find(
+            (profile) => profile.id === selectedProfileId,
+          );
+
+          if (targetProfile?.serverPetId && API_BASE_URL) {
+            const response = await fetch(
+              `${API_BASE_URL}/api/v1/pets/${targetProfile.serverPetId}`,
+              {
+                method: "DELETE",
+                headers: {
+                  "ngrok-skip-browser-warning": "true",
+                },
+              },
+            );
+
+            if (!response.ok) {
+              show("서버에서 반려동물 삭제 실패");
+              return;
+            }
+          }
+
           const updatedProfiles = profiles.filter(
             (profile) => profile.id !== selectedProfileId,
           );

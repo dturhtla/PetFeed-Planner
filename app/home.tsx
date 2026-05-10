@@ -52,7 +52,7 @@ export default function HomeScreen() {
 
   const loadSelectedPet = useCallback(async () => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
 
       if (!savedUser) {
         setPets([]);
@@ -132,9 +132,31 @@ export default function HomeScreen() {
               : pet.petType,
       }));
 
-      setPets(loadedPets);
+      const savedLocalProfiles = await AsyncStorage.getItem(
+        storageKeys.petProfiles(email),
+      );
 
-      if (loadedPets.length === 0) {
+      let localProfiles = [];
+
+      try {
+        localProfiles = savedLocalProfiles
+          ? JSON.parse(savedLocalProfiles)
+          : [];
+      } catch {
+        localProfiles = [];
+      }
+
+      const localPets: Pet[] = localProfiles.map((profile: any) => ({
+        id: String(profile.serverPetId ?? profile.id),
+        name: profile.name,
+        petType: profile.petType,
+      }));
+
+      const displayPets = loadedPets.length > 0 ? loadedPets : localPets;
+
+      setPets(displayPets);
+
+      if (displayPets.length === 0) {
         setSelectedPetId(null);
         return;
       }
@@ -143,12 +165,12 @@ export default function HomeScreen() {
         storageKeys.selectedPetId(email),
       );
 
-      if (savedPetId && loadedPets.some((pet) => pet.id === savedPetId)) {
+      if (savedPetId && displayPets.some((pet) => pet.id === savedPetId)) {
         setSelectedPetId(savedPetId);
         return;
       }
 
-      const firstPetId = loadedPets[0].id;
+      const firstPetId = displayPets[0].id;
       setSelectedPetId(firstPetId);
       await AsyncStorage.setItem(storageKeys.selectedPetId(email), firstPetId);
     } catch (error) {
@@ -215,7 +237,7 @@ export default function HomeScreen() {
 
   const handleSelectPet = async (pet: Pet) => {
     try {
-      const savedUser = await AsyncStorage.getItem("loggedInUser");
+      const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
       if (!savedUser) return;
 
       const parsedUser = JSON.parse(savedUser);
