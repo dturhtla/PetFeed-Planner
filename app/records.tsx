@@ -27,7 +27,7 @@ import {
 import { storageKeys } from "../utils/storageKeys";
 import { to24Hour } from "../utils/timeUtils";
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 type PetProfileItem = {
   id: string;
