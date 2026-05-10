@@ -48,7 +48,7 @@ type AlarmItem = {
   enabled: boolean;
 };
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 function getAlarmSortValue(alarm: AlarmItem) {
@@ -389,6 +389,7 @@ export default function FeedingHistoryScreen() {
     );
 
     const missedAmount = missed.reduce((sum, alarm) => sum + alarm.amount, 0);
+
     const targetAmount = fedAmount + missedAmount;
 
     const eatenAmount = dayRecords.reduce(
@@ -396,9 +397,17 @@ export default function FeedingHistoryScreen() {
       0,
     );
 
-    return targetAmount > 0
-      ? Math.round((eatenAmount / targetAmount) * 100)
-      : 0;
+    // ⭐ 기록 자체가 없으면 null 반환
+    if (dayRecords.length === 0 && dayAlarms.length === 0) {
+      return null;
+    }
+
+    // ⭐ 기록은 있는데 섭취율 0%인 경우
+    if (targetAmount <= 0) {
+      return 0;
+    }
+
+    return Math.round((eatenAmount / targetAmount) * 100);
   };
 
   const getDotColor = (date: Date) => {
@@ -792,7 +801,10 @@ const styles = StyleSheet.create({
     alignItems: "flex-start",
   },
   headerTitle: {
-    flex: 1, // ⭐ 추가
+    position: "absolute",
+    left: 60,
+    right: 60,
+    textAlign: "center",
     fontSize: 18,
     fontFamily: "NanumB",
     color: "#2F6B57",

@@ -117,7 +117,7 @@ const MONTH_OPTIONS = [
   ...Array.from({ length: 11 }, (_, i) => String(i + 1)),
 ];
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 export default function ProfileScreen() {
   const router = useRouter();

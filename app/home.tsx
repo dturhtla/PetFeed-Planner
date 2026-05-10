@@ -27,7 +27,7 @@ const menuList = [
   { title: "AI 챗봇", icon: "chatbubble-ellipses-outline", route: "/chatbot" },
 ];
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 export default function HomeScreen() {
   const router = useRouter();

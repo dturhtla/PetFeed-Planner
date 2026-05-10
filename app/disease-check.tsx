@@ -40,7 +40,7 @@ type ProfileData = {
   diseases?: string[];
 };
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL;
+const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 const parseAgeToMonths = (age?: string) => {
   if (!age) return 0;
