@@ -383,7 +383,7 @@ export default function AnalysisResultScreen() {
             body: JSON.stringify({
               bcs: bcsToNumber(profile.bcs || ""),
               food_id: foodId,
-              recommended_amount: result.feeding_recommendation.daily_grams,
+              recommended_amount: result.feeding_recommendation.grams_per_meal,
             }),
           });
           console.log("Go 서버 저장 완료");
