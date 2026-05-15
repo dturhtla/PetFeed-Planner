@@ -309,13 +309,23 @@ export default function FeedingHistoryScreen() {
     const intakeRate =
       targetAmount > 0 ? Math.round((eatenAmount / targetAmount) * 100) : 0;
 
-    const iotAmount = selectedDateRecords
-      .filter((record) => record.source === "alarm")
-      .reduce((sum, record) => sum + getGramNumber(record.amount), 0);
+    const iotRecords = selectedDateRecords.filter(
+      (record) => record.source === "alarm",
+    );
 
-    const manualAmount = selectedDateRecords
-      .filter((record) => record.source === "manual")
-      .reduce((sum, record) => sum + getGramNumber(record.amount), 0);
+    const manualRecords = selectedDateRecords.filter(
+      (record) => record.source === "manual",
+    );
+
+    const iotAmount = iotRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.amount),
+      0,
+    );
+
+    const manualAmount = manualRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.amount),
+      0,
+    );
 
     return {
       totalAmount: targetAmount,
@@ -328,6 +338,8 @@ export default function FeedingHistoryScreen() {
       missedCount: missedAlarms.length,
       completedCount: selectedDateRecords.length,
       targetCount: selectedDateRecords.length + missedAlarms.length,
+      iotCount: iotRecords.length,
+      manualCount: manualRecords.length,
     };
   }, [selectedDateRecords, missedAlarms]);
 
@@ -706,7 +718,7 @@ export default function FeedingHistoryScreen() {
                       </View>
 
                       <Text style={styles.timelineAmount}>
-                        {item.alarm.feedingType}식사 / {item.alarm.amount}g
+                        {item.alarm.amount}g
                       </Text>
                     </View>
                   );
@@ -748,12 +760,16 @@ export default function FeedingHistoryScreen() {
 
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>IoT 급여량</Text>
-                <Text style={styles.greenValue}>{dailyStats.iotAmount}g</Text>
+                <Text style={styles.greenValue}>
+                  {dailyStats.iotAmount}g/{dailyStats.iotCount}회
+                </Text>
               </View>
 
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>수동 급여량</Text>
-                <Text style={styles.statValue}>{dailyStats.manualAmount}g</Text>
+                <Text style={styles.statValue}>
+                  {dailyStats.manualAmount}g/{dailyStats.manualCount}회
+                </Text>
               </View>
 
               {dailyStats.missedCount > 0 && (

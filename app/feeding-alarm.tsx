@@ -83,12 +83,6 @@ const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, i) =>
   String(i).padStart(2, "0"),
 );
 
-const FEEDING_TYPE_OPTIONS = [
-  { key: "아침", icon: "weather-sunset-up" as const },
-  { key: "점심", icon: "white-balance-sunny" as const },
-  { key: "저녁", icon: "weather-night" as const },
-] as const;
-
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
 const EMPTY_FOOD: FoodItem = {
@@ -813,7 +807,7 @@ export default function FeedingAlarmScreen() {
                     !alarm.enabled && styles.alarmMetaDisabled,
                   ]}
                 >
-                  {alarm.feedingType} {formatDaysLabel(alarm.days)}
+                  {formatDaysLabel(alarm.days)}
                 </Text>
                 <Text
                   style={[
@@ -944,38 +938,6 @@ export default function FeedingAlarmScreen() {
             onWheelEnd={(e) => handleHourMinuteWheelEnd(e, "minute")}
             onDoubleTap={() => startManualTimeEdit("minute")}
           />
-        </View>
-      </View>
-
-      <View style={styles.sectionBlock}>
-        <Text style={styles.sectionTitle}>급여 종류</Text>
-        <View style={styles.feedingTypeRow}>
-          {FEEDING_TYPE_OPTIONS.map((item) => {
-            const isSelected = selectedFeedingType === item.key;
-
-            return (
-              <TouchableOpacity
-                key={item.key}
-                style={[styles.typeChip, isSelected && styles.typeChipSelected]}
-                activeOpacity={0.85}
-                onPress={() => setSelectedFeedingType(item.key)}
-              >
-                <MaterialCommunityIcons
-                  name={item.icon}
-                  size={15}
-                  color={isSelected ? "#2F6B57" : "#7A7A7A"}
-                />
-                <Text
-                  style={[
-                    styles.typeChipText,
-                    isSelected && styles.typeChipTextSelected,
-                  ]}
-                >
-                  {item.key}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
         </View>
       </View>
 

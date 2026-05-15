@@ -73,7 +73,6 @@ type AlarmItem = {
   enabled: boolean;
 };
 
-const FEEDING_TYPE_OPTIONS = ["아침", "점심", "저녁"] as const;
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
 
 function createInitialTime() {
@@ -666,6 +665,34 @@ export default function RecordsScreen() {
     [isFedFromAlarm],
   );
 
+  const todayStats = useMemo(() => {
+    const today = formatDate();
+
+    const todayRecords = records.filter(
+      (record) => record.petId === selectedPetId && record.date === today,
+    );
+
+    const givenAmount = todayRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.amount),
+      0,
+    );
+
+    const eatenAmount = todayRecords.reduce(
+      (sum, record) => sum + getGramNumber(record.eatenAmount ?? record.amount),
+      0,
+    );
+
+    const missedCount = todayFeedingSchedules.filter((alarm) =>
+      isMissedAlarm(alarm),
+    ).length;
+
+    return {
+      givenAmount,
+      eatenAmount,
+      missedCount,
+    };
+  }, [records, selectedPetId, todayFeedingSchedules, isMissedAlarm]);
+
   const previewAlarm = useMemo(() => {
     return nearestAlarm;
   }, [nearestAlarm]);
@@ -696,73 +723,6 @@ export default function RecordsScreen() {
 
     return null;
   }, [previewAlarm]);
-
-  const missedAlarmCount = useMemo(() => {
-    return todayFeedingSchedules.filter((alarm) => isMissedAlarm(alarm)).length;
-  }, [todayFeedingSchedules, isMissedAlarm]);
-
-  const todayStats = useMemo(() => {
-    const today = formatDate();
-
-    const todayRecords = records.filter(
-      (record) => record.petId === selectedPetId && record.date === today,
-    );
-
-    const iotRecords = todayRecords.filter(
-      (record) => record.source === "alarm",
-    );
-    const manualTodayRecords = todayRecords.filter(
-      (record) => record.source === "manual",
-    );
-
-    const iotAmount = iotRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.amount),
-      0,
-    );
-
-    const manualAmount = manualTodayRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.amount),
-      0,
-    );
-
-    const scheduledAmount = todayFeedingSchedules.reduce(
-      (sum, alarm) => sum + alarm.amount,
-      0,
-    );
-
-    const givenAmount = iotAmount + manualAmount;
-
-    const eatenAmount = iotRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.eatenAmount ?? record.amount),
-      0,
-    );
-    const remainAmount = Math.max(iotAmount - eatenAmount, 0);
-
-    const completedCount = todayFeedingSchedules.filter((alarm) =>
-      isFedFromAlarm(alarm),
-    ).length;
-
-    const targetCount = todayFeedingSchedules.length;
-
-    return {
-      scheduledAmount,
-      givenAmount,
-      eatenAmount,
-      remainAmount,
-      iotAmount,
-      manualAmount,
-      manualCount: manualTodayRecords.length,
-      missedCount: missedAlarmCount,
-      completedCount,
-      targetCount,
-    };
-  }, [
-    records,
-    selectedPetId,
-    todayFeedingSchedules,
-    missedAlarmCount,
-    isFedFromAlarm,
-  ]);
 
   const isRecordFormValid =
     !!selectedFood?.name &&
@@ -1293,7 +1253,6 @@ export default function RecordsScreen() {
 
                 <View style={styles.alarmPreviewTextWrap}>
                   <Text style={styles.alarmPreviewMeta}>
-                    {previewAlarm.feedingType}{" "}
                     {formatAlarmDays(previewAlarm.days)}
                   </Text>
                   <Text style={styles.alarmPreviewFood}>
@@ -1311,119 +1270,23 @@ export default function RecordsScreen() {
         )}
 
         <View style={styles.todaySummaryCard}>
-          <Text style={styles.todaySummaryTitle}>오늘 급여 정보</Text>
-
-          <View style={styles.summaryTopRow}>
-            <View style={styles.summaryMiniBox}>
-              <Text style={styles.summaryMiniLabel}>준 양</Text>
-              <Text style={styles.summaryMiniValue}>
-                {todayStats.givenAmount}g
-              </Text>
-              <Text style={styles.summaryMiniSub}>IoT + 수동</Text>
-            </View>
-
-            <View style={styles.summaryMiniBox}>
-              <Text style={styles.summaryMiniLabel}>먹은 양</Text>
-              <Text
-                style={[styles.summaryMiniValue, styles.summaryMiniValueBlue]}
-              >
-                {todayStats.eatenAmount}g
-              </Text>
-              <Text style={styles.summaryMiniSub}>IoT 기준</Text>
-            </View>
-          </View>
-
-          <View style={styles.progressWrap}>
-            <View style={styles.progressTextRow}>
-              <Text style={styles.progressLabel}>준 양</Text>
-              <Text style={styles.progressValue}>
-                {todayStats.givenAmount}g
-              </Text>
-            </View>
-            <View style={styles.progressBarBg}>
-              <View
-                style={[
-                  styles.progressBarFill,
-                  {
-                    width: `${Math.min(
-                      100,
-                      todayStats.scheduledAmount > 0
-                        ? (todayStats.givenAmount /
-                            todayStats.scheduledAmount) *
-                            100
-                        : 0,
-                    )}%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-
-          <View style={styles.progressWrap}>
-            <View style={styles.progressTextRow}>
-              <Text style={styles.progressLabel}>먹은 양</Text>
-              <Text style={[styles.progressValue, styles.progressValueBlue]}>
-                {todayStats.eatenAmount}g
-              </Text>
-            </View>
-            <View style={styles.progressBarBg}>
-              <View
-                style={[
-                  styles.progressBarFillBlue,
-                  {
-                    width: `${Math.min(
-                      100,
-                      todayStats.givenAmount > 0
-                        ? (todayStats.eatenAmount / todayStats.givenAmount) *
-                            100
-                        : 0,
-                    )}%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-
-          <View style={styles.summaryResultRow}>
-            <Text style={styles.summaryResultLabel}>남은 양</Text>
-            <Text style={styles.summaryResultValue}>
-              {todayStats.remainAmount}g
+          <Text style={styles.todaySummaryTitle}>오늘 급여 요약</Text>
+          <View style={styles.todaySummaryInlineRow}>
+            <Text style={styles.todaySummaryInlineText}>
+              급여량 {todayStats.givenAmount}g
             </Text>
-          </View>
-        </View>
 
-        <View style={styles.detailStatsCard}>
-          <Text style={styles.detailStatsTitle}>확장 통계</Text>
-
-          <View style={styles.statRow}>
-            <Text style={styles.statLabel}>IoT 급여량</Text>
-            <Text style={styles.statValue}>{todayStats.iotAmount}g</Text>
-          </View>
-
-          {todayStats.manualCount > 0 && (
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>수동 급여량</Text>
-              <Text style={styles.statValue}>{todayStats.manualAmount}g</Text>
-            </View>
-          )}
-
-          {todayStats.missedCount > 0 && (
-            <View style={styles.statRow}>
-              <Text style={styles.statLabel}>미지급 횟수</Text>
-              <Text style={styles.statMissedValue}>
-                {todayStats.missedCount}회
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.statRowLast}>
-            <Text style={styles.statLabel}>급여 상태</Text>
-            <Text style={styles.statValue}>
-              {todayStats.completedCount}회
-              <Text style={styles.statTargetText}>
-                /목표 {todayStats.targetCount}회
-              </Text>
+            <Text style={styles.todaySummaryInlineCenterText}>
+              섭취량 {todayStats.eatenAmount}g
             </Text>
+
+            {todayStats.missedCount > 0 ? (
+              <Text style={styles.todaySummaryInlineMissedText}>
+                미지급 {todayStats.missedCount}회
+              </Text>
+            ) : (
+              <View style={styles.todaySummaryPlaceholder} />
+            )}
           </View>
         </View>
 
@@ -1512,8 +1375,8 @@ export default function RecordsScreen() {
 
                       <Text style={styles.scheduleSubSimple}>
                         {isDone && alarmRecord
-                          ? `${alarm.feedingType}식사 / 급여량 ${alarmRecord.amount}, 섭취량 ${alarmRecord.eatenAmount ?? alarmRecord.amount}`
-                          : `${alarm.feedingType}식사 / ${alarm.amount}g`}
+                          ? `급여량 ${alarmRecord.amount}, 섭취량 ${alarmRecord.eatenAmount ?? alarmRecord.amount}`
+                          : `${alarm.amount}g`}
                       </Text>
                     </View>
 
@@ -1594,7 +1457,7 @@ export default function RecordsScreen() {
                     </Text>
 
                     <Text style={styles.scheduleSubSimple}>
-                      {record.feedingType}식사 / 급여량 {record.amount}, 섭취량{" "}
+                      급여량 {record.amount}, 섭취량{" "}
                       {record.eatenAmount ?? "측정 안 됨"}
                     </Text>
                   </View>
@@ -1798,33 +1661,6 @@ export default function RecordsScreen() {
                     <Ionicons name="add-circle" size={20} color="#2F6B57" />
                   </TouchableOpacity>
                 </View>
-              </View>
-
-              <View style={styles.recordTypeBox}>
-                {FEEDING_TYPE_OPTIONS.map((type) => {
-                  const isSelected = selectedFeedingType === type;
-
-                  return (
-                    <TouchableOpacity
-                      key={type}
-                      style={[
-                        styles.recordTypeChip,
-                        isSelected && styles.recordTypeChipSelected,
-                      ]}
-                      activeOpacity={0.85}
-                      onPress={() => setSelectedFeedingType(type)}
-                    >
-                      <Text
-                        style={[
-                          styles.recordTypeChipText,
-                          isSelected && styles.recordTypeChipTextSelected,
-                        ]}
-                      >
-                        {type}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
               </View>
 
               <TouchableOpacity
@@ -2425,21 +2261,6 @@ const styles = StyleSheet.create({
     color: "#D06B33",
     marginRight: 2,
   },
-
-  todaySummaryCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: "#E6E6E6",
-  },
-  todaySummaryTitle: {
-    fontSize: 15,
-    fontFamily: "NanumB",
-    color: "#2F2F2F",
-    marginBottom: 12,
-  },
   summaryTopRow: {
     flexDirection: "row",
     gap: 10,
@@ -2826,7 +2647,7 @@ const styles = StyleSheet.create({
   },
 
   foodSheetTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: "NanumB",
     color: "#222222",
     marginBottom: 14,
@@ -3288,5 +3109,47 @@ const styles = StyleSheet.create({
     fontFamily: "NanumB",
     color: "#2F6B57",
     textAlign: "center",
+  },
+
+  todaySummaryCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: "#E6E6E6",
+  },
+
+  todaySummaryTitle: {
+    fontSize: 16,
+    fontFamily: "NanumB",
+    color: "#111111",
+    marginBottom: 18,
+  },
+  todaySummaryInlineRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  todaySummaryInlineText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+
+  todaySummaryInlineMissedText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#D14A3A",
+  },
+  todaySummaryInlineCenterText: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+
+  todaySummaryPlaceholder: {
+    width: 70,
   },
 });

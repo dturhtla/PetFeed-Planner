@@ -13,9 +13,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const API_URL = "https://soulful-ouida-penetrably.ngrok-free.dev";
-const GO_SERVER_URL =
-  "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
+const API_URL = process.env.EXPO_PUBLIC_API_URL;
+const GO_SERVER_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 type ProfileData = {
   name: string;
@@ -147,6 +146,17 @@ export default function AnalysisResultScreen() {
       const serverUserId = parsedUser.serverUserId;
 
       console.log("email:", email);
+
+      if (!API_URL) {
+        setError("사료 분석 서버 주소가 설정되지 않았어요.");
+        return;
+      }
+
+      if (!GO_SERVER_URL) {
+        setError("Go 서버 주소가 설정되지 않았어요.");
+        return;
+      }
+
       console.log("serverUserId:", serverUserId);
 
       if (!serverUserId) {
@@ -211,7 +221,12 @@ export default function AnalysisResultScreen() {
       const profile: ProfileData = {
         name: selectedPet.name || localProfile?.name || "",
         age: selectedPet.age || localProfile?.age || "",
-        weight: String(selectedPet.weight || selectedPet.current_weight || localProfile?.weight || "0"),
+        weight: String(
+          selectedPet.weight ||
+            selectedPet.current_weight ||
+            localProfile?.weight ||
+            "0",
+        ),
         gender: selectedPet.gender || localProfile?.gender || "",
         petType:
           selectedPet.species === "Dog"
@@ -269,7 +284,7 @@ export default function AnalysisResultScreen() {
         await fetch(`${API_URL}/health`, {
           headers: { "ngrok-skip-browser-warning": "true" },
         });
-      } catch (_) {}
+      } catch {}
 
       const response = await fetch(requestUrl, {
         method: "POST",
