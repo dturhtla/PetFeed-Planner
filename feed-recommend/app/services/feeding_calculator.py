@@ -186,10 +186,10 @@ async def calculate_feeding(
 
     # 2. 공식 권장량 검색
     official_grams = None
-    if food.brand and food.product_name:
-        official_grams = await search_official_feeding_guide(
-            food.brand, food.product_name, species, weight_kg, age_years
-        )
+    # if food.brand and food.product_name:
+    #     official_grams = await search_official_feeding_guide(
+    #         food.brand, food.product_name, species, weight_kg, age_years
+    #     )
 
     # 3. 교차 검증 및 최종 급여량 결정
     warning_message = None
