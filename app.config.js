@@ -23,6 +23,10 @@ module.exports = {
     extra: {
       ...(appJson.expo.extra || {}),
       geminiApiKey: (process.env.EXPO_PUBLIC_GEMINI_API_KEY || "").trim(),
+      apiUrl: (process.env.EXPO_PUBLIC_API_URL || "").trim(),
+      goServerUrl: (process.env.EXPO_PUBLIC_GO_SERVER_URL || "").trim(),
+      chatApiUrl: (process.env.EXPO_PUBLIC_CHAT_API_URL || "").trim(),
+      chatUserId: (process.env.EXPO_PUBLIC_CHAT_USER_ID || "").trim(),
     },
   },
 };

@@ -14,6 +14,8 @@ export const storageKeys = {
     `savedFoods_${email}_${petId}`,
   feedingAlarms: (email: string, petId: string | number) =>
     `feeding_alarms_${email}_${petId}`,
+  lastFeedAnalysis: (email: string, petId: string | number) =>
+    `lastFeedAnalysis_${email}_${petId}`,
 
   migratedPetId: (email: string) => `migrated_petId_${email}`,
 
