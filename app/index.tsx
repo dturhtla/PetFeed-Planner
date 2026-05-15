@@ -88,8 +88,8 @@ export default function LoginScreen() {
       await AsyncStorage.setItem(
         "loggedInUser",
         JSON.stringify({
-          id: foundUser.id,
-          email: foundUser.email,
+          id: userToLogin.id,
+          email: userToLogin.email,
           serverUserId: userToLogin.serverUserId,
         }),
       );
