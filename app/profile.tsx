@@ -827,21 +827,27 @@ export default function ProfileScreen() {
             (profile) => profile.id === selectedProfileId,
           );
 
-          if (targetProfile?.serverPetId && API_BASE_URL) {
-            const response = await fetch(
-              `${API_BASE_URL}/api/v1/pets/${targetProfile.serverPetId}`,
-              {
-                method: "DELETE",
-                headers: {
-                  "ngrok-skip-browser-warning": "true",
+          try {
+            if (targetProfile?.serverPetId && API_BASE_URL) {
+              const response = await fetch(
+                `${API_BASE_URL}/api/v1/pets/${targetProfile.serverPetId}`,
+                {
+                  method: "DELETE",
+                  headers: {
+                    "ngrok-skip-browser-warning": "true",
+                  },
                 },
-              },
-            );
+              );
 
-            if (!response.ok) {
-              show("서버에서 반려동물 삭제 실패");
-              return;
+              if (!response.ok) {
+                show("서버에서 반려동물 삭제 실패");
+                return;
+              }
             }
+          } catch (error) {
+            console.log("handleDeleteProfile server delete error:", error);
+            show("서버 연결 중 문제가 발생했어요.");
+            return;
           }
 
           const updatedProfiles = profiles.filter(

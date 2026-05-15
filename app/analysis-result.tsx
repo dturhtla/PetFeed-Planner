@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { saveLastFeedAnalysis } from "../utils/chatPetContext";
+import { storageKeys } from "../utils/storageKeys";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const GO_SERVER_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
@@ -166,7 +167,9 @@ export default function AnalysisResultScreen() {
       }
 
       // 선택된 반려동물 ID 가져오기
-      const savedPetId = await AsyncStorage.getItem(`selectedPetId_${email}`);
+      const savedPetId = await AsyncStorage.getItem(
+        storageKeys.selectedPetId(email),
+      );
       console.log("savedPetId:", savedPetId);
 
       // Go 서버에서 반려동물 목록 가져오기
@@ -212,7 +215,9 @@ export default function AnalysisResultScreen() {
 
       const serverPetId = String(selectedPet.pet_id ?? selectedPet.id);
 
-      const savedProfiles = await AsyncStorage.getItem(`petProfiles_${email}`);
+      const savedProfiles = await AsyncStorage.getItem(
+        storageKeys.petProfiles(email),
+      );
       const localProfiles = savedProfiles ? JSON.parse(savedProfiles) : [];
 
       const localProfile = localProfiles.find(
@@ -437,14 +442,16 @@ export default function AnalysisResultScreen() {
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
 
-      const savedPetId = await AsyncStorage.getItem(`selectedPetId_${email}`);
+      const savedPetId = await AsyncStorage.getItem(
+        storageKeys.selectedPetId(email),
+      );
       if (!savedPetId) {
         ToastAndroid.show("반려동물을 선택해주세요.", ToastAndroid.SHORT);
         return;
       }
 
       const savedFoods = await AsyncStorage.getItem(
-        `savedFoods_${email}_${savedPetId}`,
+        storageKeys.savedFoods(email, savedPetId),
       );
       const foodList = savedFoods ? JSON.parse(savedFoods) : [];
 
@@ -473,7 +480,7 @@ export default function AnalysisResultScreen() {
       };
 
       await AsyncStorage.setItem(
-        `savedFoods_${email}_${savedPetId}`,
+        storageKeys.savedFoods(email, savedPetId),
         JSON.stringify([...foodList, newFood]),
       );
 
