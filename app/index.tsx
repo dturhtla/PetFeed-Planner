@@ -14,6 +14,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import { getChatApiOrigin, registerUserOnBackend } from "../utils/chatHistoryApi";
+
 type User = {
   id: string;
   email: string;
@@ -54,8 +56,25 @@ export default function LoginScreen() {
         return;
       }
 
-      // server_id 우선 사용, 없으면 로컬 id 사용
-      if (!foundUser.serverUserId) {
+      let userToLogin: User = foundUser;
+
+      if (!foundUser.serverUserId && getChatApiOrigin()) {
+        const reg = await registerUserOnBackend({
+          email: foundUser.email,
+          password: foundUser.password,
+        });
+        if (reg.ok) {
+          userToLogin = { ...foundUser, serverUserId: reg.userId };
+          const nextUsers = users.map((u) =>
+            u.email.toLowerCase() === foundUser.email.toLowerCase()
+              ? { ...u, serverUserId: reg.userId }
+              : u,
+          );
+          await AsyncStorage.setItem("users", JSON.stringify(nextUsers));
+        }
+      }
+
+      if (!userToLogin.serverUserId) {
         Alert.alert(
           "로그인 실패",
           "서버 사용자 ID가 없습니다. 다시 회원가입해주세요.",
@@ -66,15 +85,15 @@ export default function LoginScreen() {
       await AsyncStorage.setItem(
         "loggedInUser",
         JSON.stringify({
-          id: foundUser.id,
-          email: foundUser.email,
-          password: foundUser.password,
-          serverUserId: foundUser.serverUserId,
+          id: userToLogin.id,
+          email: userToLogin.email,
+          password: userToLogin.password,
+          serverUserId: userToLogin.serverUserId,
         }),
       );
 
       const completed = await AsyncStorage.getItem(
-        `profileCompleted_${foundUser.email}`,
+        `profileCompleted_${userToLogin.email}`,
       );
 
       if (completed === "true") {
