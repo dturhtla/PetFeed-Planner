@@ -1,12 +1,13 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
+import { storageKeys } from "./storageKeys";
 
 export type FeedingAlarmNotificationItem = {
   id: string;
   period: "오전" | "오후";
   hour: string;
   minute: string;
-  feedingType: "아침" | "점심" | "저녁";
   foodName: string;
   amount: number;
   days: string[];
@@ -24,12 +25,20 @@ const KOR_TO_WEEKDAY: Record<string, number> = {
 };
 
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
+  handleNotification: async () => {
+    const savedSound = await AsyncStorage.getItem(
+      storageKeys.feedingNotificationSoundEnabled,
+    );
+
+    const soundEnabled = savedSound !== "false";
+
+    return {
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: soundEnabled,
+      shouldSetBadge: false,
+    };
+  },
 });
 
 export function to24Hour(period: "오전" | "오후", hour: string) {
@@ -54,13 +63,13 @@ async function ensureNotificationPermission() {
   return finalStatus === "granted";
 }
 
-async function ensureAndroidChannel() {
+async function ensureAndroidChannel(vibrationEnabled: boolean) {
   if (Platform.OS !== "android") return;
 
   await Notifications.setNotificationChannelAsync("feeding-alarm", {
     name: "급여 알림",
     importance: Notifications.AndroidImportance.HIGH,
-    vibrationPattern: [0, 250, 250, 250],
+    vibrationPattern: vibrationEnabled ? [0, 250, 250, 250] : [],
     lightColor: "#2F6B57",
   });
 }
@@ -87,7 +96,18 @@ export async function syncFeedingAlarmNotifications(
   const granted = await ensureNotificationPermission();
   if (!granted) return;
 
-  await ensureAndroidChannel();
+  const savedSound = await AsyncStorage.getItem(
+    storageKeys.feedingNotificationSoundEnabled,
+  );
+
+  const savedVibration = await AsyncStorage.getItem(
+    storageKeys.feedingNotificationVibrationEnabled,
+  );
+
+  const soundEnabled = savedSound !== "false";
+  const vibrationEnabled = savedVibration !== "false";
+
+  await ensureAndroidChannel(vibrationEnabled);
   await clearFeedingAlarmNotifications();
 
   const enabledAlarms = alarms.filter(
@@ -105,11 +125,10 @@ export async function syncFeedingAlarmNotifications(
         content: {
           title: "급여 알림",
           body: `${alarm.foodName} ${alarm.amount}g 급여할 시간이에요.`,
-          sound: true,
+          sound: soundEnabled,
           data: {
             kind: "feeding-alarm",
             alarmId: alarm.id,
-            feedingType: alarm.feedingType,
           },
         },
         trigger: {

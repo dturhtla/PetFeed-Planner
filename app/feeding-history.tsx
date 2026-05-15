@@ -32,7 +32,6 @@ type FeedingRecord = {
   sortKey?: number;
   source?: "alarm" | "manual";
   alarmId?: string;
-  feedingType: "아침" | "점심" | "저녁";
 };
 
 type AlarmItem = {
@@ -40,7 +39,6 @@ type AlarmItem = {
   period: "오전" | "오후";
   hour: string;
   minute: string;
-  feedingType: "아침" | "점심" | "저녁";
   foodName: string;
   foodSubLabel: string;
   amount: number;
@@ -735,16 +733,6 @@ export default function FeedingHistoryScreen() {
                   >
                     <View style={styles.timelineLeft}>
                       <Text style={styles.timeText}>{item.record.time}</Text>
-                      <Text
-                        style={[
-                          styles.sourceBadge,
-                          item.record.source === "manual" && styles.manualBadge,
-                        ]}
-                      >
-                        {item.record.source === "alarm"
-                          ? "IoT 급여"
-                          : "수동 급여"}
-                      </Text>
                     </View>
 
                     <Text style={styles.timelineAmount}>
@@ -757,20 +745,6 @@ export default function FeedingHistoryScreen() {
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>상세 통계</Text>
-
-              <View style={styles.statRow}>
-                <Text style={styles.statLabel}>IoT 급여량</Text>
-                <Text style={styles.greenValue}>
-                  {dailyStats.iotAmount}g/{dailyStats.iotCount}회
-                </Text>
-              </View>
-
-              <View style={styles.statRow}>
-                <Text style={styles.statLabel}>수동 급여량</Text>
-                <Text style={styles.statValue}>
-                  {dailyStats.manualAmount}g/{dailyStats.manualCount}회
-                </Text>
-              </View>
 
               {dailyStats.missedCount > 0 && (
                 <View style={styles.statRow}>
@@ -1050,11 +1024,6 @@ const styles = StyleSheet.create({
     fontFamily: "NanumB",
     color: "#333",
   },
-  greenValue: {
-    fontSize: 12,
-    fontFamily: "NanumB",
-    color: "#2F6B57",
-  },
   orangeValue: {
     fontSize: 12,
     fontFamily: "NanumB",
@@ -1097,21 +1066,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-  },
-
-  sourceBadge: {
-    fontSize: 11,
-    fontFamily: "NanumB",
-    color: "#2F6B57",
-    backgroundColor: "#E8F4EE",
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-
-  manualBadge: {
-    color: "#8A6A3D",
-    backgroundColor: "#F4F1EA",
   },
 
   missedBadge: {

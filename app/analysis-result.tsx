@@ -444,12 +444,16 @@ export default function AnalysisResultScreen() {
         return;
       }
 
+      const oneMealAmount = feeding.grams_per_meal ?? feeding.daily_grams;
+
       const newFood = {
         id: `${Date.now()}`,
         name: foodName,
         subLabel: foodInfo.brand || "AI 분석 사료",
-        gramLabel: `${feeding.daily_grams}g 권장`,
-        recommendedAmount: feeding.daily_grams,
+        gramLabel: `${oneMealAmount}g 권장`,
+        recommendedAmount: oneMealAmount,
+        dailyRecommendedAmount: feeding.daily_grams,
+        mealsPerDay: feeding.meals_per_day,
         petId: savedPetId,
         petName: analyzedPetName,
         isCustom: true,

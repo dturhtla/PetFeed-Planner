@@ -63,7 +63,6 @@ type AlarmItem = {
   period: "오전" | "오후";
   hour: string;
   minute: string;
-  feedingType: "아침" | "점심" | "저녁";
   foodName: string;
   foodSubLabel: string;
   amount: number;
@@ -183,9 +182,6 @@ export default function FeedingAlarmScreen() {
   const [selectedPeriod, setSelectedPeriod] = useState<"오전" | "오후">("오후");
   const [selectedHour, setSelectedHour] = useState("05");
   const [selectedMinute, setSelectedMinute] = useState("15");
-  const [selectedFeedingType, setSelectedFeedingType] = useState<
-    "아침" | "점심" | "저녁"
-  >("저녁");
   const [selectedFood, setSelectedFood] = useState<FoodItem>(EMPTY_FOOD);
 
   const [foodLibrary, setFoodLibrary] = useState<FoodItem[]>([]);
@@ -362,7 +358,6 @@ export default function FeedingAlarmScreen() {
     setSelectedPeriod("오후");
     setSelectedHour("05");
     setSelectedMinute("15");
-    setSelectedFeedingType("저녁");
     setSelectedFood(EMPTY_FOOD);
     setTempSelectedFood(EMPTY_FOOD);
     setAmount(50);
@@ -596,11 +591,6 @@ export default function FeedingAlarmScreen() {
       return;
     }
 
-    if (!selectedFeedingType) {
-      Alert.alert("알림", "급여 종류를 선택해주세요.");
-      return;
-    }
-
     if (!selectedFood || selectedFood.id === "temp") {
       Alert.alert("알림", "사료를 입력해주세요.");
       return;
@@ -624,7 +614,6 @@ export default function FeedingAlarmScreen() {
         period: selectedPeriod,
         hour: selectedHour,
         minute: selectedMinute,
-        feedingType: selectedFeedingType,
         foodName: selectedFood.name,
         foodSubLabel: selectedFood.subLabel,
         amount,
@@ -669,7 +658,6 @@ export default function FeedingAlarmScreen() {
     setSelectedPeriod(alarm.period);
     setSelectedHour(alarm.hour);
     setSelectedMinute(alarm.minute);
-    setSelectedFeedingType(alarm.feedingType);
 
     const foundFood: FoodItem = {
       id: `temp-${alarm.id}`,
@@ -1543,37 +1531,6 @@ const styles = StyleSheet.create({
     color: "#2F2F2F",
     paddingVertical: 0,
   },
-  feedingTypeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    gap: 8,
-  },
-  typeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 88,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1.3,
-    borderColor: "#D7D7D7",
-  },
-  typeChipSelected: {
-    backgroundColor: "#EEF7F3",
-    borderColor: "#2F6B57",
-  },
-  typeChipText: {
-    marginLeft: 5,
-    fontSize: 13,
-    fontFamily: "NanumB",
-    color: "#777777",
-  },
-  typeChipTextSelected: {
-    color: "#2F6B57",
-  },
-
   foodSelector: {
     height: 62,
     borderRadius: 16,

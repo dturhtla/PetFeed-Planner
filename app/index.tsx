@@ -68,7 +68,6 @@ export default function LoginScreen() {
         JSON.stringify({
           id: foundUser.id,
           email: foundUser.email,
-          password: foundUser.password,
           serverUserId: foundUser.serverUserId,
         }),
       );

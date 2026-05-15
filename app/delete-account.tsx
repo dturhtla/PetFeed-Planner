@@ -14,10 +14,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
+
 type User = {
   id: string;
   email: string;
   password: string;
+  serverUserId?: number;
 };
 
 type PetProfile = {
@@ -30,6 +32,8 @@ type PetProfile = {
   bcs?: string;
   diseases?: string[];
 };
+
+const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 export default function DeleteAccountScreen() {
   const router = useRouter();
@@ -62,12 +66,24 @@ export default function DeleteAccountScreen() {
 
       const updatedUsers = users.filter(
         (user) =>
-          !(
-            user.id === currentUser.id &&
-            user.email === currentUser.email &&
-            user.password === currentUser.password
-          ),
+          !(user.id === currentUser.id && user.email === currentUser.email),
       );
+
+      if (currentUser.serverUserId && API_BASE_URL) {
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/users/${currentUser.serverUserId}`,
+          {
+            method: "DELETE",
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          throw new Error("서버 탈퇴 실패");
+        }
+      }
 
       await AsyncStorage.setItem("users", JSON.stringify(updatedUsers));
 
@@ -156,7 +172,17 @@ export default function DeleteAccountScreen() {
         return;
       }
 
-      if (currentUser.password !== password) {
+      const savedUsers = await AsyncStorage.getItem(storageKeys.users);
+      const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
+
+      const matchedUser = users.find(
+        (user) =>
+          user.id === currentUser.id &&
+          user.email === currentUser.email &&
+          user.password === password,
+      );
+
+      if (!matchedUser) {
         Alert.alert("오류", "비밀번호가 일치하지 않습니다.");
         return;
       }
