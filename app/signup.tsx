@@ -16,8 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
 
-const GO_SERVER_URL =
-  "https://preirrigational-concha-prealphabetically.ngrok-free.dev";
+const GO_SERVER_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 type User = {
   id: string; // 로그인 아이디
@@ -349,7 +348,6 @@ export default function SignupScreen() {
         JSON.stringify({
           id: trimmedId,
           email: trimmedEmail,
-          password,
           serverUserId: Number(serverUserId),
         }),
       );

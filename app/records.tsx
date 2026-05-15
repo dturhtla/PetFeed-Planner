@@ -46,7 +46,6 @@ type FeedingRecord = {
   sortKey?: number;
   source?: "alarm" | "manual";
   alarmId?: string;
-  feedingType: "아침" | "점심" | "저녁";
 };
 
 type FoodItem = {
@@ -65,7 +64,6 @@ type AlarmItem = {
   period: "오전" | "오후";
   hour: string;
   minute: string;
-  feedingType: "아침" | "점심" | "저녁";
   foodName: string;
   foodSubLabel: string;
   amount: number;
@@ -183,10 +181,6 @@ export default function RecordsScreen() {
   const [petProfiles, setPetProfiles] = useState<PetProfileItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<string>("");
 
-  const [selectedFeedingType, setSelectedFeedingType] = useState<
-    "아침" | "점심" | "저녁"
-  >("아침");
-
   const [records, setRecords] = useState<FeedingRecord[]>([]);
 
   const [nearestAlarm, setNearestAlarm] = useState<AlarmItem | null>(null);
@@ -276,7 +270,6 @@ export default function RecordsScreen() {
     setAmount("0");
     setEatenAmount("0");
     setSelectedTime(createInitialTime());
-    setSelectedFeedingType("아침");
     setIsFoodSheetVisible(false);
     setIsTimePickerVisible(false);
     setIsAddFoodFormVisible(false);
@@ -805,7 +798,6 @@ export default function RecordsScreen() {
         sortKey: Date.now(),
         source: isFromAlarm ? "alarm" : "manual",
         alarmId: isFromAlarm ? (selectedAlarmId ?? undefined) : undefined,
-        feedingType: selectedFeedingType,
       };
 
       // 기존 로컬 저장 유지
@@ -1077,7 +1069,6 @@ export default function RecordsScreen() {
     setTempSelectedFood(foundFood);
     setAmount(String(alarm.amount));
     setEatenAmount(String(alarm.amount));
-    setSelectedFeedingType(alarm.feedingType);
     setSelectedTime(createDateFromAlarm(alarm));
     setIsAddModalVisible(true);
   };
@@ -1359,14 +1350,6 @@ export default function RecordsScreen() {
                             ? ` (${normalizeRecordTime(alarmRecord.time)} 급여)`
                             : ""}
                         </Text>
-
-                        {isDone && (
-                          <View style={styles.recordSourceBadgeRight}>
-                            <Text style={styles.recordSourceBadgeText}>
-                              IoT
-                            </Text>
-                          </View>
-                        )}
                       </View>
 
                       <Text style={styles.scheduleFoodSimple}>
@@ -1434,22 +1417,6 @@ export default function RecordsScreen() {
                         {normalizeRecordTime(record.time)} 완료 (
                         {normalizeRecordTime(record.time)} 급여)
                       </Text>
-
-                      <View
-                        style={[
-                          styles.recordSourceBadgeRight,
-                          styles.recordSourceBadgeManual,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.recordSourceBadgeText,
-                            styles.recordSourceBadgeManualText,
-                          ]}
-                        >
-                          수동
-                        </Text>
-                      </View>
                     </View>
 
                     <Text style={styles.scheduleFoodSimple}>
@@ -1522,10 +1489,7 @@ export default function RecordsScreen() {
         <View style={styles.modalOverlay}>
           <Pressable style={styles.modalBackdrop} onPress={closeAddModal} />
 
-          <View
-            {...panResponder.panHandlers}
-            style={[styles.bottomSheet, { paddingBottom: insets.bottom + 4 }]}
-          >
+          <View {...panResponder.panHandlers} style={styles.bottomSheet}>
             <View style={styles.sheetHandle} />
 
             <View style={styles.recordSheetContent}>
@@ -2614,7 +2578,7 @@ const styles = StyleSheet.create({
   },
 
   bottomSheet: {
-    height: 406,
+    height: 340,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,

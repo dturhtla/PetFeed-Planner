@@ -16,4 +16,7 @@ export const storageKeys = {
     `feeding_alarms_${email}_${petId}`,
 
   migratedPetId: (email: string) => `migrated_petId_${email}`,
+
+  feedingNotificationSoundEnabled: "feedingNotificationSoundEnabled",
+  feedingNotificationVibrationEnabled: "feedingNotificationVibrationEnabled",
 };
