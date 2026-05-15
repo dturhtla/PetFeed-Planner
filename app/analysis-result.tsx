@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { saveLastFeedAnalysis } from "../utils/chatPetContext";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 const GO_SERVER_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
@@ -326,6 +327,18 @@ export default function AnalysisResultScreen() {
         setFoodInfo(result.food_info);
         setFeeding(result.feeding_recommendation);
         setAnalyzedPetName(profile.name);
+
+        try {
+          await saveLastFeedAnalysis(email, {
+            petId: serverPetId,
+            petName: profile.name || "반려동물",
+            analyzedAt: new Date().toISOString(),
+            foodInfo: result.food_info,
+            feeding: result.feeding_recommendation,
+          });
+        } catch (err) {
+          console.log("챗봇용 사료 분석 저장 실패:", err);
+        }
 
         // 1. 사료 정보 등록 먼저
         let foodId = null;

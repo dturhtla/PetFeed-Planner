@@ -23,8 +23,10 @@ import Constants from "expo-constants";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system/legacy";
 import * as ImagePicker from "expo-image-picker";
+import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Image,
@@ -40,6 +42,14 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
+import { buildChatPetContextBlock } from "../utils/chatPetContext";
+import {
+  fetchChatHistoryFromServer,
+  getChatApiOrigin,
+  mapServerChatLogsToMessages,
+  resolveChatBackendUserId,
+  saveChatTurnToServer,
+} from "../utils/chatHistoryApi";
 
 let idCounter = 0;
 function nextId() {
@@ -77,7 +87,12 @@ Food and product recommendations (flash cards):
 BRAND_JSON:{"brandName":"Brand","productName":"Product line","species":"dog","estimatedPrice":"~$60–75 (30 lb)","benefits":["protein 26% crude","fat 15%","for adult maintenance"]}
 - species must be exactly "dog" or "cat" to match the animal. benefits must be short strings in the SAME language as your answer (English answer → English benefits; Korean answer → Korean benefits). estimatedPrice must match that language (e.g. USD for English, ₩/원 for Korean). Do not add the words "estimate" or "추정" in estimatedPrice—pack size in parentheses is enough.
 - Only skip BRAND_JSON when you give generic advice without naming specific commercial products, or for rabbits/other species (plain text only).
-- For rabbits or other species, plain text only — no BRAND_JSON.`;
+- For rabbits or other species, plain text only — no BRAND_JSON.
+
+Registered pet data:
+- Below you may receive REGISTERED PET DATA and Last feed analysis from the user's app (server + local storage).
+- When the user asks about their pet's name, diseases, weight, age, BCS, or recent 사료 분석, answer using that data only.
+- Do not invent pets, diagnoses, or analysis results not listed there.`;
 
 /**
  * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
@@ -94,14 +109,20 @@ const VISION_MODELS = [
   "gemini-1.5-flash",
 ] as const;
 
-function isQuotaOrRateLimitError(err: unknown): boolean {
+/** Retry with the next model on quota, rate limit, or temporary overload (503). */
+function isRetryableGeminiError(err: unknown): boolean {
   const e = err as { status?: number; message?: string };
   const msg = (e?.message || "").toLowerCase();
   return (
     e?.status === 429 ||
+    e?.status === 503 ||
     msg.includes("429") ||
+    msg.includes("503") ||
     msg.includes("quota") ||
-    msg.includes("resource exhausted")
+    msg.includes("resource exhausted") ||
+    msg.includes("high demand") ||
+    msg.includes("overloaded") ||
+    msg.includes("unavailable")
   );
 }
 
@@ -164,6 +185,8 @@ export default function ChatbotScreen() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const chatSyncOrigin = getChatApiOrigin();
+  const [historyReady, setHistoryReady] = useState(!chatSyncOrigin);
   const listRef = useRef<FlatList<ChatMessage>>(null);
   /** Text in the input when the user started voice input (prepended to transcript). */
   const speechBaseRef = useRef("");
@@ -173,8 +196,68 @@ export default function ChatbotScreen() {
   const textModelIndexRef = useRef(0);
   /** Last text-message locale (photo replies use this for card labels). */
   const lastReplyLocaleRef = useRef<ChatReplyLocale>("ko");
+  /** Pet profile + last 사료 분석 snapshot for system instruction. */
+  const petContextRef = useRef("");
 
   const apiKey = getGeminiApiKey();
+
+  const refreshPetContext = useCallback(async () => {
+    const block = await buildChatPetContextBlock();
+    if (block !== petContextRef.current) {
+      petContextRef.current = block;
+      modelRef.current = null;
+      chatSessionRef.current = null;
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void refreshPetContext();
+    }, [refreshPetContext]),
+  );
+
+  const persistChatTurn = useCallback(
+    async (userMessage: string, aiMessage: string) => {
+      if (!getChatApiOrigin()) return;
+      try {
+        const userId = await resolveChatBackendUserId();
+        if (!userId) return;
+        await saveChatTurnToServer({ userId, userMessage, aiMessage });
+      } catch (e) {
+        console.warn("save-turn failed:", e);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!chatSyncOrigin) return;
+    let alive = true;
+    (async () => {
+      try {
+        const userId = await resolveChatBackendUserId();
+        if (!userId) {
+          console.warn(
+            "Chat API URL is set but no backend user id. Sign up / log in again (서버 연동), or set EXPO_PUBLIC_CHAT_USER_ID in .env.",
+          );
+          return;
+        }
+        const logs = await fetchChatHistoryFromServer(userId);
+        if (!alive || logs.length === 0) return;
+        const mapped = mapServerChatLogsToMessages(logs, nextId);
+        setMessages(mapped as ChatMessage[]);
+        modelRef.current = null;
+        chatSessionRef.current = null;
+      } catch (e) {
+        console.warn("Chat history load failed:", e);
+      } finally {
+        if (alive) setHistoryReady(true);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [chatSyncOrigin]);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -207,9 +290,13 @@ export default function ChatbotScreen() {
       const genAI = new GoogleGenerativeAI(apiKey);
       const modelName =
         TEXT_MODELS[textModelIndexRef.current] ?? TEXT_MODELS[0];
+      const systemText = petContextRef.current
+        ? `${SYSTEM_INSTRUCTION}\n\n${petContextRef.current}`
+        : SYSTEM_INSTRUCTION;
+
       modelRef.current = genAI.getGenerativeModel({
         model: modelName,
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction: systemText,
         generationConfig: { maxOutputTokens: 2048 },
       });
 
@@ -280,7 +367,7 @@ export default function ChatbotScreen() {
         lastErr = err;
         const e = err as { status?: number; message?: string };
         const msg = e?.message || "";
-        const isQuota = isQuotaOrRateLimitError(err);
+        const isQuota = isRetryableGeminiError(err);
         const isLiteVisionUnsupported =
           msg.includes("400") &&
           (msg.toLowerCase().includes("multimodal") ||
@@ -308,6 +395,7 @@ export default function ChatbotScreen() {
     mimeType: string,
     base64FromPicker: string | null | undefined,
   ) => {
+    if (!historyReady) return;
     let b64 = base64FromPicker;
     if (!b64) {
       b64 = await imageToBase64(uri, null);
@@ -339,6 +427,7 @@ export default function ChatbotScreen() {
           replyLocale: lastReplyLocaleRef.current,
         },
       ]);
+      void persistChatTurn("(사진) 반려동물 사진 분석", analysis);
     } catch (err: unknown) {
       console.error("Pet photo analysis error:", err);
       const e = err as { message?: string };
@@ -426,7 +515,7 @@ export default function ChatbotScreen() {
   };
 
   const openPetImagePicker = () => {
-    if (isLoading) return;
+    if (isLoading || !historyReady) return;
 
     if (Platform.OS === "web") {
       Alert.alert("Add pet photo", "Choose how to add an image.", [
@@ -516,7 +605,7 @@ export default function ChatbotScreen() {
   }, []);
 
   const startRecording = useCallback(async () => {
-    if (isLoading) return;
+    if (isLoading || !historyReady) return;
     if (isListening) {
       stopRecording();
       return;
@@ -552,11 +641,11 @@ export default function ChatbotScreen() {
         (e as Error)?.message ?? "음성 인식을 시작할 수 없습니다.",
       );
     }
-  }, [input, isLoading, isListening, stopRecording]);
+  }, [input, isLoading, isListening, stopRecording, historyReady]);
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || !historyReady) return;
 
     const replyLocale = inferUserMessageLocale(text);
     lastReplyLocaleRef.current = replyLocale;
@@ -569,6 +658,8 @@ export default function ChatbotScreen() {
     setIsLoading(true);
 
     try {
+      await refreshPetContext();
+
       const attemptSend = async () => {
         const chat = getOrCreateChatSession();
         const textForModel = wrapUserMessageForModelLanguage(text, replyLocale);
@@ -585,7 +676,7 @@ export default function ChatbotScreen() {
           textModelIndexRef.current = i;
           break;
         } catch (err: unknown) {
-          if (!isQuotaOrRateLimitError(err)) {
+          if (!isRetryableGeminiError(err)) {
             throw err;
           }
           if (i >= TEXT_MODELS.length - 1) {
@@ -611,6 +702,7 @@ export default function ChatbotScreen() {
           replyLocale,
         },
       ]);
+      void persistChatTurn(text, aiText);
     } catch (err: unknown) {
       console.error("Gemini API error:", err);
       const e = err as {
@@ -620,7 +712,11 @@ export default function ChatbotScreen() {
         errorDetails?: unknown;
       };
       let errorMessage = e?.message || "Unknown error";
-      if (isQuotaOrRateLimitError(err)) {
+      const msgLower = errorMessage.toLowerCase();
+      if (e?.status === 503 || msgLower.includes("503") || msgLower.includes("high demand")) {
+        errorMessage =
+          "Gemini 서버가 일시적으로 바쁩니다 (503). 잠시 후 다시 시도해 주세요. 자동으로 다른 모델로 재시도했지만 모두 실패한 경우입니다.";
+      } else if (isRetryableGeminiError(err)) {
         const retrySec = /retry in ([\d.]+)s/i.exec(errorMessage)?.[1];
         errorMessage = retrySec
           ? `요청 한도에 도달했습니다. ${Math.ceil(Number(retrySec))}초 후 다시 시도하거나, 내일 다시 시도해 주세요. (무료 플랜은 모델·일별 한도가 있습니다.)`
@@ -724,6 +820,14 @@ export default function ChatbotScreen() {
         keyboardVerticalOffset={Platform.OS === "ios" ? insets.top : 0}
       >
         <View style={styles.card}>
+          {!historyReady ? (
+            <View style={styles.historyLoadingOverlay} pointerEvents="auto">
+              <ActivityIndicator size="large" color="#0d9488" />
+              <Text style={styles.historyLoadingText}>
+                이전 대화를 불러오는 중…
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.header}>
             <View style={styles.iconOuter}>
               <View style={styles.iconInner}>
@@ -771,11 +875,11 @@ export default function ChatbotScreen() {
           <View style={styles.inputRow}>
             <TouchableOpacity
               onPress={openPetImagePicker}
-              disabled={isLoading}
+              disabled={isLoading || !historyReady}
               accessibilityLabel="Add pet photo: camera, photo library, or files"
               style={[
                 styles.attachButton,
-                isLoading && styles.sendButtonDisabled,
+                (!historyReady || isLoading) && styles.sendButtonDisabled,
               ]}
             >
               <Ionicons name="images-outline" size={22} color="#ffffff" />
@@ -783,14 +887,14 @@ export default function ChatbotScreen() {
             {isSpeechRecognitionAvailable ? (
               <TouchableOpacity
                 onPress={startRecording}
-                disabled={isLoading}
+                disabled={isLoading || !historyReady}
                 accessibilityLabel={
                   isListening ? "음성 입력 중지" : "음성 입력 시작"
                 }
                 style={[
                   styles.attachButton,
                   isListening && styles.micButtonListening,
-                  isLoading && styles.sendButtonDisabled,
+                  (!historyReady || isLoading) && styles.sendButtonDisabled,
                 ]}
               >
                 <Ionicons
@@ -805,17 +909,18 @@ export default function ChatbotScreen() {
               onChangeText={setInput}
               placeholder="반려동물에 대해 질문하세요…"
               placeholderTextColor="#8a9e96"
-              editable={!isLoading}
+              editable={!isLoading && historyReady}
               style={styles.input}
               returnKeyType="send"
               onSubmitEditing={sendMessage}
             />
             <TouchableOpacity
               onPress={sendMessage}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || !historyReady}
               style={[
                 styles.sendButton,
-                (isLoading || !input.trim()) && styles.sendButtonDisabled,
+                (isLoading || !input.trim() || !historyReady) &&
+                  styles.sendButtonDisabled,
               ]}
             >
               <Text style={styles.sendIcon}>➤</Text>
@@ -842,6 +947,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#fdfdfa",
     borderWidth: 1,
     borderColor: "rgba(47, 107, 87, 0.15)",
+    position: "relative",
+  },
+  historyLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(253, 253, 250, 0.92)",
+    zIndex: 20,
+  },
+  historyLoadingText: {
+    marginTop: 12,
+    fontSize: 14,
+    color: "#2F6B57",
+    fontWeight: "600",
   },
   header: {
     paddingTop: 16,
