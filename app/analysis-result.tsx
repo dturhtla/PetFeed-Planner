@@ -94,6 +94,14 @@ const bcsToNumber = (bcs: string): number => {
   return bcsMap[bcs] || 5;
 };
 
+const bcsScoreToLabel = (bcsScore: number): string => {
+  if (bcsScore <= 1) return "심한 저체중";
+  if (bcsScore <= 3) return "저체중";
+  if (bcsScore <= 5) return "정상";
+  if (bcsScore <= 7) return "과체중";
+  return "비만";
+};
+
 const diseaseMapReverse: Record<string, string> = {
   kidney_disease: "신장질환",
   heart_disease: "심장질환",
@@ -106,10 +114,27 @@ const diseaseMapReverse: Record<string, string> = {
   none: "없음",
 };
 
-const mapDiseasesToKorean = (healthStatus: string): string[] => {
-  if (!healthStatus || healthStatus === "none") return ["없음"];
+const mapDiseasesToKorean = (healthStatus: string | string[]): string[] => {
+  if (!healthStatus) return ["없음"];
+
+  if (Array.isArray(healthStatus)) {
+    if (healthStatus.length === 0) return ["없음"];
+    const mapped = healthStatus
+      .map((s) => diseaseMapReverse[s])
+      .filter(Boolean);
+    return mapped.length > 0 ? mapped : ["없음"];
+  }
+
+  if (healthStatus === "none") return ["없음"];
   const korean = diseaseMapReverse[healthStatus];
   return korean ? [korean] : ["없음"];
+};
+
+const genderValueToKorean = (gender: string): string => {
+  if (gender === "M") return "남";
+  if (gender === "F") return "여";
+  if (gender === "U") return "중성화";
+  return gender;
 };
 
 export default function AnalysisResultScreen() {
@@ -215,6 +240,25 @@ export default function AnalysisResultScreen() {
 
       const serverPetId = String(selectedPet.pet_id ?? selectedPet.id);
 
+      // 반려동물 상세 조회
+      let petDetail: any = null;
+      try {
+        const petDetailResponse = await fetch(
+          `${GO_SERVER_URL}/api/v1/pets/${serverPetId}`,
+          {
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
+          },
+        );
+        if (petDetailResponse.ok) {
+          petDetail = await petDetailResponse.json();
+          console.log("반려동물 상세 정보:", JSON.stringify(petDetail));
+        }
+      } catch (err) {
+        console.log("반려동물 상세 조회 실패:", err);
+      }
+
       const savedProfiles = await AsyncStorage.getItem(
         storageKeys.petProfiles(email),
       );
@@ -226,25 +270,35 @@ export default function AnalysisResultScreen() {
 
       const profile: ProfileData = {
         name: selectedPet.name || localProfile?.name || "",
-        age: selectedPet.age || localProfile?.age || "",
+        age: petDetail?.age || selectedPet.age || localProfile?.age || "",
         weight: String(
-          selectedPet.weight ||
+          petDetail?.current_weight ||
             selectedPet.current_weight ||
+            selectedPet.weight ||
             localProfile?.weight ||
             "0",
         ),
-        gender: selectedPet.gender || localProfile?.gender || "",
+        gender: genderValueToKorean(
+          petDetail?.gender || selectedPet.gender || localProfile?.gender || "",
+        ),
         petType:
-          selectedPet.species === "Dog"
+          (petDetail?.species || selectedPet.species) === "Dog"
             ? "강아지"
-            : selectedPet.species === "Cat"
+            : (petDetail?.species || selectedPet.species) === "Cat"
               ? "고양이"
               : localProfile?.petType || "",
-        bcs: selectedPet.bcs || localProfile?.bcs || "정상",
+        bcs:
+          bcsScoreToLabel(petDetail?.bcs_score || selectedPet.bcs_score) ||
+          localProfile?.bcs ||
+          "정상",
         diseases:
-          selectedPet.diseases ||
-          localProfile?.diseases ||
-          mapDiseasesToKorean(selectedPet.health_status || "none"),
+          mapDiseasesToKorean(
+            petDetail?.diseases ||
+              petDetail?.health_status ||
+              selectedPet.diseases ||
+              selectedPet.health_status ||
+              "none"
+          ) || localProfile?.diseases,
       };
       console.log("서버에서 프로필 가져옴:", profile);
 
