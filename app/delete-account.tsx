@@ -70,6 +70,13 @@ export default function DeleteAccountScreen() {
       );
 
       if (currentUser.serverUserId && API_BASE_URL) {
+        console.log(
+          "탈퇴 요청 URL:",
+          `${API_BASE_URL}/users/${currentUser.serverUserId}`,
+        );
+
+        console.log("serverUserId:", currentUser.serverUserId);
+
         const response = await fetch(
           `${API_BASE_URL}/api/v1/users/${currentUser.serverUserId}`,
           {
@@ -80,8 +87,19 @@ export default function DeleteAccountScreen() {
           },
         );
 
-        if (!response.ok) {
-          throw new Error("서버 탈퇴 실패");
+        const responseText = await response.text();
+
+        console.log("탈퇴 응답 status:", response.status);
+        console.log("탈퇴 응답 body:", responseText);
+
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`서버 탈퇴 실패: ${response.status} ${responseText}`);
+        }
+
+        if (response.status === 404) {
+          console.log(
+            "서버에는 이미 없는 사용자라 로컬 탈퇴 처리를 계속 진행합니다.",
+          );
         }
       }
 

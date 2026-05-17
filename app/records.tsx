@@ -58,6 +58,7 @@ type FoodItem = {
   petId?: string;
   petName?: string;
   isCustom?: boolean;
+  foodId?: number;
 };
 
 type AlarmItem = {
@@ -1153,15 +1154,42 @@ export default function RecordsScreen() {
     try {
       setIsSavingFood(true);
 
+      let serverFoodId: number | undefined;
+
+      // 서버 food 등록
+      if (API_BASE_URL) {
+        try {
+          const response = await requestJson(`${API_BASE_URL}/api/v1/foods`, {
+            method: "POST",
+            body: JSON.stringify({
+              product_name: trimmedName,
+              kcal_per_g: 0,
+              protein_pct: 0,
+              fat_pct: 0,
+            }),
+          });
+
+          console.log("foods 등록 응답:", response);
+
+          serverFoodId =
+            response?.food_id ?? response?.id ?? response?.data?.food_id;
+        } catch (serverError) {
+          console.log("foods 서버 등록 실패:", serverError);
+        }
+      }
+
       const newItem: FoodItem = {
-        id: `custom-${Date.now()}`,
+        id: String(serverFoodId ?? `custom-${Date.now()}`),
+        foodId: serverFoodId,
         name: trimmedName,
         subLabel: `${gramOnly}g`,
         gramLabel: `${gramOnly}g`,
         isCustom: true,
+        petId: selectedPetId,
       };
 
       const updatedFoods = [newItem, ...foodLibrary];
+
       setFoodLibrary(updatedFoods);
       setTempSelectedFood(newItem);
 
@@ -1176,11 +1204,9 @@ export default function RecordsScreen() {
       setNewFoodName("");
       setNewFoodGram("");
     } catch (error) {
-      console.log("handleAddNewFood error: ", error);
-      Alert.alert(
-        "추가 실패",
-        "사료를 추가하는 중 문제가 발생했어요. 다시 시도해주세요.",
-      );
+      console.log("handleAddNewFood error:", error);
+
+      Alert.alert("추가 실패", "사료를 추가하는 중 문제가 발생했어요.");
     } finally {
       setIsSavingFood(false);
     }
