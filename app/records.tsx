@@ -171,6 +171,39 @@ const show = (msg: string) => {
   ToastAndroid.show(msg, ToastAndroid.SHORT);
 };
 
+function formatServerDateTime(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  const second = String(date.getSeconds()).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+async function requestJson(url: string, options: RequestInit) {
+  const response = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
+      ...(options.headers || {}),
+    },
+  });
+
+  let data: any = null;
+  try {
+    data = await response.json();
+  } catch {}
+
+  if (!response.ok) {
+    throw new Error(data?.detail || data?.message || `HTTP ${response.status}`);
+  }
+
+  return data;
+}
+
 export default function RecordsScreen() {
   const insets = useSafeAreaInsets();
 
@@ -264,6 +297,24 @@ export default function RecordsScreen() {
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   };
 
+  const createDateFromRecord = (record: FeedingRecord) => {
+    const [year, month, day] = record.date.split(".").map(Number);
+    const [hour, minute] = normalizeRecordTime(record.time)
+      .split(":")
+      .map(Number);
+
+    const date = new Date();
+    date.setFullYear(year);
+    date.setMonth((month || 1) - 1);
+    date.setDate(day || 1);
+    date.setHours(hour || 0);
+    date.setMinutes(minute || 0);
+    date.setSeconds(0);
+    date.setMilliseconds(0);
+
+    return date;
+  };
+
   const resetAddForm = useCallback(() => {
     setSelectedFood(null);
     setTempSelectedFood(null);
@@ -323,9 +374,68 @@ export default function RecordsScreen() {
     [],
   );
 
-  const loadIoTRecords = async (petId: string): Promise<FeedingRecord[]> => {
-    // TODO: IoT 조회 API 완성 후 여기만 실제 fetch로 교체
-    return [];
+  const loadIoTRecords = async (
+    petId: string,
+    email: string,
+  ): Promise<FeedingRecord[]> => {
+    if (!API_BASE_URL || !petId) return [];
+
+    const savedAlarms = await AsyncStorage.getItem(
+      storageKeys.feedingAlarms(email, petId),
+    );
+    const parsedAlarms: AlarmItem[] = savedAlarms
+      ? JSON.parse(savedAlarms)
+      : [];
+
+    const todayKor = getTodayKorDay();
+    const todayAlarms = Array.isArray(parsedAlarms)
+      ? parsedAlarms.filter(
+          (alarm) => alarm.enabled && alarm.days?.includes(todayKor),
+        )
+      : [];
+
+    const serverRecords = await Promise.all(
+      todayAlarms.map(async (alarm) => {
+        try {
+          const feedTime = formatServerDateTime(createDateFromAlarm(alarm));
+
+          const result = await requestJson(
+            `${API_BASE_URL}/pets/meal-details`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                pet_id: Number(petId),
+                feed_time: feedTime,
+              }),
+            },
+          );
+
+          const feedAmount = Number(result?.feed_amount ?? 0);
+          const consumption = Number(result?.consumption ?? 0);
+          const foodName = String(result?.food_name ?? "").trim();
+
+          if (feedAmount <= 0 && consumption <= 0 && !foodName) return null;
+
+          return {
+            id: `server-${petId}-${feedTime}`,
+            petId,
+            date: formatDate(),
+            foodName: foodName || alarm.foodName,
+            amount: `${feedAmount || alarm.amount}g`,
+            eatenAmount: `${consumption}g`,
+            time: formatAlarmDisplayTime(alarm),
+            sortKey: createDateFromAlarm(alarm).getTime(),
+            source: "alarm" as const,
+            alarmId: alarm.id,
+          };
+        } catch (error) {
+          console.log("loadIoTRecords meal-details error:", error);
+          return null;
+        }
+      }),
+    );
+
+    return serverRecords.filter(Boolean) as FeedingRecord[];
   };
 
   const loadProfilesAndRecords = useCallback(async () => {
@@ -491,7 +601,7 @@ export default function RecordsScreen() {
         ? JSON.parse(savedRecords)
         : [];
 
-      const iotRecords = await loadIoTRecords(petIdForFoods);
+      const iotRecords = await loadIoTRecords(petIdForFoods, email);
 
       setRecords([...iotRecords, ...manualRecords]);
 
@@ -731,54 +841,51 @@ export default function RecordsScreen() {
   const handleSaveRecord = async () => {
     if (isSavingRecord) return;
 
+    if (!API_BASE_URL) {
+      Alert.alert("저장 실패", "서버 주소가 설정되지 않았습니다.");
+      return;
+    }
+
     if (!selectedFood || !selectedFood.name) {
       Alert.alert("알림", "사료를 선택해주세요.");
       return;
     }
 
-    // 2. 급여량 입력 확인
     if (!amount.trim()) {
       Alert.alert("알림", "급여량을 입력해주세요.");
       return;
     }
 
-    // 3. 숫자인지 확인
     if (isNaN(Number(amount))) {
       Alert.alert("알림", "급여량은 숫자만 입력해주세요.");
       return;
     }
 
-    // 4. 0 이하 값 방지
     if (Number(amount) <= 0) {
       Alert.alert("알림", "급여량은 0보다 커야 합니다.");
       return;
     }
 
-    // 5. 비정상적으로 큰 값 방지 (선택)
     if (Number(amount) > 1000) {
       Alert.alert("알림", "급여량이 너무 많습니다.");
       return;
     }
 
-    // 6. 먹은량 입력 확인
     if (!eatenAmount.trim()) {
       Alert.alert("알림", "섭취량을 입력해주세요.");
       return;
     }
 
-    // 7. 먹은량 숫자인지 확인
     if (isNaN(Number(eatenAmount))) {
       Alert.alert("알림", "섭취량은 숫자만 입력해주세요.");
       return;
     }
 
-    // 8. 먹은량 음수 방지
     if (Number(eatenAmount) < 0) {
       Alert.alert("알림", "섭취량은 0 이상이어야 합니다.");
       return;
     }
 
-    // 9. 먹은량 > 급여량 방지
     if (Number(eatenAmount) > Number(amount)) {
       Alert.alert("알림", "섭취량은 급여량보다 클 수 없습니다.");
       return;
@@ -787,21 +894,39 @@ export default function RecordsScreen() {
     setIsSavingRecord(true);
 
     try {
+      const feedTime = formatServerDateTime(selectedTime);
+
+      await requestJson(`${API_BASE_URL}/iot/self-manual-weight`, {
+        method: "POST",
+        body: JSON.stringify({
+          pet_id: Number(selectedPetId),
+          feed_time: feedTime,
+          feed_amount: Number(amount),
+          consumption: Number(eatenAmount),
+        }),
+      });
+
+      const now = Date.now();
       const newRecord: FeedingRecord = {
-        id: `${Date.now()}`,
+        id: `${now}`,
         petId: selectedPetId,
         date: formatDate(),
         foodName: selectedFood.name,
         amount: `${amount}g`,
         eatenAmount: `${eatenAmount}g`,
         time: formatDisplayTime(selectedTime),
-        sortKey: Date.now(),
+        sortKey: now,
         source: isFromAlarm ? "alarm" : "manual",
         alarmId: isFromAlarm ? (selectedAlarmId ?? undefined) : undefined,
       };
 
-      // 기존 로컬 저장 유지
-      const updatedRecords = [...records, newRecord];
+      const updatedRecords = [
+        ...records.filter(
+          (record) =>
+            !(newRecord.alarmId && record.alarmId === newRecord.alarmId),
+        ),
+        newRecord,
+      ];
       setRecords(updatedRecords);
 
       await AsyncStorage.setItem(
@@ -815,7 +940,7 @@ export default function RecordsScreen() {
       console.log("handleSaveRecord error: ", error);
       Alert.alert(
         "저장 실패",
-        "급여 기록을 저장하는 중 문제가 발생했어요. 다시 시도해주세요.",
+        "서버에 급여 기록을 저장하는 중 문제가 발생했어요. 다시 시도해주세요.",
       );
     } finally {
       setIsSavingRecord(false);
@@ -825,10 +950,32 @@ export default function RecordsScreen() {
   const handleDeleteSelectedManualRecords = async () => {
     if (isDeletingRecord) return;
 
+    if (!API_BASE_URL) {
+      Alert.alert("삭제 실패", "서버 주소가 설정되지 않았습니다.");
+      return;
+    }
+
     if (!userEmail || selectedManualRecordIds.length === 0) return;
 
     try {
       setIsDeletingRecord(true);
+
+      const recordsToDelete = records.filter((record) =>
+        selectedManualRecordIds.includes(record.id),
+      );
+
+      await Promise.all(
+        recordsToDelete.map((record) =>
+          requestJson(`${API_BASE_URL}/iot/weight-pair`, {
+            method: "DELETE",
+            body: JSON.stringify({
+              pet_id: Number(record.petId),
+              feed_time: formatServerDateTime(createDateFromRecord(record)),
+              feed_amount: getGramNumber(record.amount),
+            }),
+          }),
+        ),
+      );
 
       const updatedRecords = records.filter(
         (record) => !selectedManualRecordIds.includes(record.id),
@@ -848,7 +995,7 @@ export default function RecordsScreen() {
       console.log("handleDeleteSelectedManualRecords error: ", error);
       Alert.alert(
         "삭제 실패",
-        "급여 기록을 삭제하는 중 문제가 발생했어요. 다시 시도해주세요.",
+        "서버에서 급여 기록을 삭제하는 중 문제가 발생했어요. 다시 시도해주세요.",
       );
     } finally {
       setIsDeletingRecord(false);
