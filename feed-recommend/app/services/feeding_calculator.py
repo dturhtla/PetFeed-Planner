@@ -152,8 +152,9 @@ async def generate_recommendation_text(
 - {official_info}
 {warning_info}
 
-위 정보를 바탕으로 보호자에게 친근한 말투로 급여 가이드를 3~4문장으로 작성해주세요.
-급여 횟수, 주의사항, 물 섭취 팁을 포함해주세요."""
+위 정보를 바탕으로 보호자에게 친근한 말투로 2~3문장으로 작성해주세요.
+급여량과 횟수는 이미 별도로 표시되므로 언급하지 마세요.
+건강 상태에 따른 주의사항, 특이사항, 물 섭취 팁 위주로 작성해주세요."""
 
     response = await generate_with_retry(
         model="gemini-2.5-flash-lite",
