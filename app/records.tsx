@@ -46,6 +46,7 @@ type FeedingRecord = {
   sortKey?: number;
   source?: "alarm" | "manual";
   alarmId?: string;
+  serverFeedTime?: string;
 };
 
 type FoodItem = {
@@ -400,7 +401,7 @@ export default function RecordsScreen() {
           const feedTime = formatServerDateTime(createDateFromAlarm(alarm));
 
           const result = await requestJson(
-            `${API_BASE_URL}/pets/meal-details`,
+            `${API_BASE_URL}/api/v1/pets/meal-details`,
             {
               method: "POST",
               body: JSON.stringify({
@@ -618,6 +619,7 @@ export default function RecordsScreen() {
       console.log("loadProfilesAndRecords error:", error);
       show("급여 기록 정보를 불러오는 중 문제가 발생했어요.");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useFocusEffect(
@@ -896,7 +898,11 @@ export default function RecordsScreen() {
     try {
       const feedTime = formatServerDateTime(selectedTime);
 
-      await requestJson(`${API_BASE_URL}/iot/self-manual-weight`, {
+      console.log("현재 선택된 pet_id:", selectedPetId);
+      console.log("서버로 보낼 pet_id:", Number(selectedPetId));
+      console.log("서버로 보낼 feed_time:", feedTime);
+
+      await requestJson(`${API_BASE_URL}/api/v1/iot/self-manual-weight`, {
         method: "POST",
         body: JSON.stringify({
           pet_id: Number(selectedPetId),
@@ -918,6 +924,7 @@ export default function RecordsScreen() {
         sortKey: now,
         source: isFromAlarm ? "alarm" : "manual",
         alarmId: isFromAlarm ? (selectedAlarmId ?? undefined) : undefined,
+        serverFeedTime: feedTime,
       };
 
       const updatedRecords = [
@@ -929,9 +936,13 @@ export default function RecordsScreen() {
       ];
       setRecords(updatedRecords);
 
+      const localRecordsToSave = updatedRecords.filter(
+        (record) => record.source !== "alarm",
+      );
+
       await AsyncStorage.setItem(
         storageKeys.feedingRecords(userEmail),
-        JSON.stringify(updatedRecords),
+        JSON.stringify(localRecordsToSave),
       );
 
       show("급여 기록이 저장되었습니다.");
@@ -965,16 +976,26 @@ export default function RecordsScreen() {
       );
 
       await Promise.all(
-        recordsToDelete.map((record) =>
-          requestJson(`${API_BASE_URL}/iot/weight-pair`, {
-            method: "DELETE",
-            body: JSON.stringify({
+        recordsToDelete.map(async (record) => {
+          try {
+            const deleteBody = {
               pet_id: Number(record.petId),
-              feed_time: formatServerDateTime(createDateFromRecord(record)),
+              feed_time:
+                record.serverFeedTime ??
+                formatServerDateTime(createDateFromRecord(record)),
               feed_amount: getGramNumber(record.amount),
-            }),
-          }),
-        ),
+            };
+
+            console.log("삭제 요청 body:", deleteBody);
+
+            await requestJson(`${API_BASE_URL}/api/v1/iot/weight-pair`, {
+              method: "DELETE",
+              body: JSON.stringify(deleteBody),
+            });
+          } catch (error) {
+            console.log("서버 삭제 실패, 로컬 삭제는 계속 진행:", error);
+          }
+        }),
       );
 
       const updatedRecords = records.filter(
@@ -983,9 +1004,13 @@ export default function RecordsScreen() {
 
       setRecords(updatedRecords);
 
+      const localRecordsToSave = updatedRecords.filter(
+        (record) => record.source !== "alarm",
+      );
+
       await AsyncStorage.setItem(
         storageKeys.feedingRecords(userEmail),
-        JSON.stringify(updatedRecords),
+        JSON.stringify(localRecordsToSave),
       );
 
       show("급여 기록이 삭제되었습니다.");
@@ -2725,7 +2750,7 @@ const styles = StyleSheet.create({
   },
 
   bottomSheet: {
-    height: 340,
+    height: 365,
     backgroundColor: "#FFFFFF",
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
