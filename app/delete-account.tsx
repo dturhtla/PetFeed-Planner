@@ -65,8 +65,7 @@ export default function DeleteAccountScreen() {
       const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
 
       const updatedUsers = users.filter(
-        (user) =>
-          !(user.id === currentUser.id && user.email === currentUser.email),
+        (user) => user.email !== currentUser.email,
       );
 
       if (currentUser.serverUserId && API_BASE_URL) {
@@ -190,18 +189,8 @@ export default function DeleteAccountScreen() {
         return;
       }
 
-      const savedUsers = await AsyncStorage.getItem(storageKeys.users);
-      const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
-
-      const matchedUser = users.find(
-        (user) =>
-          user.id === currentUser.id &&
-          user.email === currentUser.email &&
-          user.password === password,
-      );
-
-      if (!matchedUser) {
-        Alert.alert("오류", "비밀번호가 일치하지 않습니다.");
+      if (!currentUser.serverUserId) {
+        Alert.alert("오류", "서버 사용자 ID가 없습니다. 다시 로그인해주세요.");
         return;
       }
 
@@ -250,7 +239,7 @@ export default function DeleteAccountScreen() {
         <View style={styles.container}>
           <Text style={styles.guideTitle}>비밀번호 확인</Text>
           <Text style={styles.guideText}>
-            계정을 삭제하려면 현재 비밀번호를 입력해주세요.
+            계정을 삭제하려면 확인을 위해 비밀번호를 입력해주세요.
           </Text>
 
           <TextInput

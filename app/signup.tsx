@@ -19,14 +19,12 @@ import { storageKeys } from "../utils/storageKeys";
 const GO_SERVER_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
 type User = {
-  id: string; // 로그인 아이디
   email: string;
   password: string;
-  serverUserId?: number; // 서버 DB user_id
+  serverUserId?: number;
 };
 
 type FieldErrors = {
-  id?: string;
   email?: string;
   password?: string;
   passwordConfirm?: string;
@@ -38,14 +36,6 @@ const isValidEmail = (value: string) => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 };
 
-const isValidId = (value: string) => {
-  const hasOnlyLettersAndNumbers = /^[a-zA-Z0-9]+$/.test(value);
-  const hasLetter = /[a-zA-Z]/.test(value);
-  const hasNumber = /[0-9]/.test(value);
-
-  return hasOnlyLettersAndNumbers && hasLetter && hasNumber;
-};
-
 const hasAllowedPasswordChars = (value: string) => {
   return /^[a-zA-Z0-9!@#$%^&*()_+=[\]{};':"\\|,.<>/?-]*$/.test(value);
 };
@@ -53,7 +43,6 @@ const hasAllowedPasswordChars = (value: string) => {
 export default function SignupScreen() {
   const router = useRouter();
 
-  const [id, setId] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -75,32 +64,6 @@ export default function SignupScreen() {
 
     loadUsers();
   }, []);
-
-  const validateIdInput = (value: string) => {
-    const trimmedValue = value.trim();
-
-    if (!trimmedValue) {
-      return "아이디를 입력해주세요.";
-    }
-
-    if (trimmedValue.length < 4 || trimmedValue.length > 20) {
-      return "아이디는 4~20자로 입력해주세요.";
-    }
-
-    if (!isValidId(trimmedValue)) {
-      return "아이디는 영문과 숫자를 모두 포함해야 합니다.";
-    }
-
-    const idExists = users.some(
-      (user) => user.id.toLowerCase() === trimmedValue.toLowerCase(),
-    );
-
-    if (idExists) {
-      return "이미 사용 중인 아이디입니다.";
-    }
-
-    return undefined;
-  };
 
   const validateEmailInput = (value: string) => {
     const trimmedValue = value.trim().toLowerCase();
@@ -160,30 +123,9 @@ export default function SignupScreen() {
   };
 
   const isFormValid =
-    !validateIdInput(id) &&
     !validateEmailInput(email) &&
     !validatePasswordInput(password) &&
     !validatePasswordConfirmInput(password, passwordConfirm);
-
-  const handleIdChange = (text: string) => {
-    const filtered = text.replace(/[^a-zA-Z0-9]/g, "");
-    setId(filtered);
-
-    if (text !== filtered) {
-      setErrors((prev) => ({
-        ...prev,
-        id: "영어와 숫자만 입력 가능합니다.",
-      }));
-      return;
-    }
-
-    const idError = validateIdInput(filtered);
-
-    setErrors((prev) => ({
-      ...prev,
-      id: idError,
-    }));
-  };
 
   const handleEmailChange = (text: string) => {
     setEmail(text);
@@ -255,11 +197,9 @@ export default function SignupScreen() {
   };
 
   const validateFields = () => {
-    const trimmedId = id.trim();
     const trimmedEmail = email.trim().toLowerCase();
 
     const newErrors: FieldErrors = {
-      id: validateIdInput(trimmedId),
       email: validateEmailInput(trimmedEmail),
       password: validatePasswordInput(password),
       passwordConfirm: validatePasswordConfirmInput(password, passwordConfirm),
@@ -273,7 +213,6 @@ export default function SignupScreen() {
 
   const handleSignup = async () => {
     try {
-      const trimmedId = id.trim();
       const trimmedEmail = email.trim().toLowerCase();
 
       if (!validateFields()) {
@@ -327,7 +266,6 @@ export default function SignupScreen() {
       }
 
       const newUser: User = {
-        id: trimmedId,
         email: trimmedEmail,
         password,
         serverUserId: Number(serverUserId),
@@ -346,7 +284,6 @@ export default function SignupScreen() {
       await AsyncStorage.setItem(
         storageKeys.loggedInUser,
         JSON.stringify({
-          id: trimmedId,
           email: trimmedEmail,
           serverUserId: Number(serverUserId),
         }),
@@ -372,17 +309,6 @@ export default function SignupScreen() {
       >
         <ScrollView contentContainerStyle={styles.container}>
           <Text style={styles.title}>회원가입</Text>
-
-          <TextInput
-            style={[styles.input, errors.id && styles.inputErrorBorder]}
-            placeholder="아이디"
-            placeholderTextColor="#777"
-            value={id}
-            onChangeText={handleIdChange}
-            autoCapitalize="none"
-            maxLength={20}
-          />
-          {errors.id ? <Text style={styles.errorText}>{errors.id}</Text> : null}
 
           <TextInput
             style={[styles.input, errors.email && styles.inputErrorBorder]}

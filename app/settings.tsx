@@ -139,12 +139,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={styles.menuButton}
-          onPress={() =>
-            Alert.alert(
-              "안내",
-              "비밀번호 변경 기능은 서버 API 연동 후 사용할 수 있습니다.",
-            )
-          }
+          onPress={() => router.push("/find-password" as any)}
         >
           <Ionicons name="lock-closed-outline" size={22} color="#2F6B57" />
           <Text style={styles.menuText}>비밀번호 변경</Text>

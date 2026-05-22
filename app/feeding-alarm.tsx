@@ -42,9 +42,8 @@ import {
 import { storageKeys } from "../utils/storageKeys";
 
 type LoggedInUser = {
-  id: string;
   email: string;
-  password: string;
+  serverUserId?: number;
 };
 
 type FoodItem = {

@@ -40,6 +40,16 @@ export default function HomeScreen() {
   const [selectedPetId, setSelectedPetId] = useState<string | null>(null);
   const [petSheetVisible, setPetSheetVisible] = useState(false);
 
+  const [iotSheetVisible, setIotSheetVisible] = useState(false);
+  const [iotDetailVisible, setIotDetailVisible] = useState(false);
+
+  const [selectedFeeder, setSelectedFeeder] = useState<any>(null);
+
+  const [connectedFeeders, setConnectedFeeders] = useState<any[]>([]);
+  const [selectedConnectPetId, setSelectedConnectPetId] = useState<
+    string | null
+  >(null);
+
   const selectedPet = pets.find((pet) => pet.id === selectedPetId) ?? pets[0];
 
   const renderPetIcon = (petType?: Pet["petType"], size = 22) => {
@@ -373,7 +383,6 @@ export default function HomeScreen() {
               <Ionicons name="person" size={18} color="#111" />
               <Text style={styles.sheetRowText}>반려동물 프로필 관리</Text>
             </TouchableOpacity>
-
             <TouchableOpacity
               style={styles.sheetRow}
               onPress={() => {
@@ -393,11 +402,168 @@ export default function HomeScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={styles.sheetRow}
+              onPress={() => {
+                setPetSheetVisible(false);
+
+                setTimeout(() => {
+                  setIotSheetVisible(true);
+                }, 250);
+              }}
+            >
+              <Ionicons name="wifi-outline" size={18} color="#111" />
+              <Text style={styles.sheetRowText}>IoT 급여기 연동</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setPetSheetVisible(false)}
             >
               <Text style={styles.closeButtonText}>닫기</Text>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal
+        visible={iotSheetVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIotSheetVisible(false)}
+      >
+        <Pressable
+          style={styles.bottomOverlay}
+          onPress={() => setIotSheetVisible(false)}
+        >
+          <Pressable style={styles.bottomSheet}>
+            <View style={styles.sheetHandle} />
+
+            <Text style={styles.iotTitle}>IoT 급여기 연동</Text>
+
+            {connectedFeeders.map((feeder) => (
+              <View key={feeder.id} style={styles.connectedFeederBox}>
+                <Text style={styles.connectedFeederName}>{feeder.name}</Text>
+                <Text style={styles.connectedFeederDesc}>
+                  {feeder.assignedPetName}와 연결됨
+                </Text>
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={styles.addFeederButton}
+              onPress={() => {
+                const nextFeederNumber = connectedFeeders.length + 1;
+
+                setSelectedFeeder({
+                  id: String(nextFeederNumber),
+                  name: `급여기 ${nextFeederNumber}`,
+                  connected: false,
+                  wifi: "연결 전",
+                  assignedPet: "",
+                });
+
+                setSelectedConnectPetId(null);
+
+                setIotSheetVisible(false);
+
+                setTimeout(() => {
+                  setIotDetailVisible(true);
+                }, 250);
+              }}
+            >
+              <Ionicons name="add" size={18} color="#2F6B57" />
+              <Text style={styles.addFeederText}>급여기 추가 연결</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={() => setIotSheetVisible(false)}
+            >
+              <Text style={styles.closeButtonText}>닫기</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+      <Modal
+        visible={iotDetailVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setIotDetailVisible(false)}
+      >
+        <Pressable
+          style={styles.bottomOverlay}
+          onPress={() => setIotDetailVisible(false)}
+        >
+          <Pressable style={styles.bottomSheet}>
+            <View style={styles.sheetHandle} />
+
+            <Text style={styles.iotTitle}>급여기 연결</Text>
+
+            <Text style={styles.iotGuide}>
+              급여기 전원을 켜고 Wi-Fi가 연결되어 있는지 확인해주세요.
+            </Text>
+
+            <Text style={styles.petSelectLabel}>지정할 반려동물</Text>
+
+            {pets.map((pet) => {
+              const isSelected = pet.id === selectedConnectPetId;
+
+              return (
+                <TouchableOpacity
+                  key={pet.id}
+                  style={[
+                    styles.selectPetBox,
+                    isSelected && styles.selectedPetBox,
+                  ]}
+                  onPress={() => setSelectedConnectPetId(pet.id)}
+                >
+                  <Text
+                    style={[
+                      styles.selectPetText,
+                      isSelected && styles.selectedPetBoxText,
+                    ]}
+                  >
+                    {pet.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+
+            <View style={styles.bottomButtonRow}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => setIotDetailVisible(false)}
+              >
+                <Text style={styles.cancelText}>취소</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.connectButton}
+                onPress={() => {
+                  const connectPet =
+                    pets.find((pet) => pet.id === selectedConnectPetId) ??
+                    selectedPet;
+
+                  if (!selectedFeeder || !connectPet) return;
+
+                  setConnectedFeeders((prev) => [
+                    ...prev,
+                    {
+                      ...selectedFeeder,
+                      connected: true,
+                      assignedPetId: connectPet.id,
+                      assignedPetName: connectPet.name,
+                    },
+                  ]);
+
+                  setIotDetailVisible(false);
+
+                  setTimeout(() => {
+                    setIotSheetVisible(true);
+                  }, 250);
+                }}
+              >
+                <Text style={styles.connectText}>연결하기</Text>
+              </TouchableOpacity>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -583,5 +749,206 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 16,
     fontFamily: "NanumB",
+  },
+  bottomOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    justifyContent: "flex-end",
+  },
+
+  bottomSheet: {
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 28,
+  },
+
+  sheetHandle: {
+    width: 54,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: "#D4D4D4",
+    alignSelf: "center",
+    marginBottom: 16,
+  },
+
+  iotTitle: {
+    fontSize: 20,
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+    marginBottom: 14,
+  },
+
+  iotSubTitle: {
+    fontSize: 14,
+    fontFamily: "Nanum",
+    marginBottom: 12,
+  },
+
+  feederItem: {
+    height: 52,
+    borderWidth: 1,
+    borderColor: "#DDE7E2",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+
+  feederLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  feederDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+
+  feederName: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+  },
+
+  feederStatus: {
+    fontSize: 13,
+    fontFamily: "Nanum",
+  },
+
+  addFeederButton: {
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#EEF8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginTop: 4,
+  },
+
+  addFeederText: {
+    fontSize: 14,
+    color: "#2F6B57",
+    fontFamily: "NanumB",
+  },
+
+  iotGuide: {
+    fontSize: 13,
+    color: "#555",
+    lineHeight: 20,
+    marginBottom: 18,
+  },
+
+  infoBox: {
+    backgroundColor: "#F7F8F7",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+  },
+
+  infoLabel: {
+    fontSize: 12,
+    color: "#666",
+    marginBottom: 6,
+  },
+
+  infoValue: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#111",
+  },
+
+  bottomButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+    marginTop: 18,
+  },
+
+  cancelButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#D9D9D9",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  connectButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#2F6B57",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  cancelText: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+  },
+
+  connectText: {
+    fontSize: 15,
+    color: "#FFF",
+    fontFamily: "NanumB",
+  },
+  petSelectLabel: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#333",
+    marginTop: 6,
+    marginBottom: 8,
+  },
+
+  selectPetBox: {
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: "#F1F1F1",
+    justifyContent: "center",
+    paddingHorizontal: 14,
+    marginBottom: 8,
+  },
+
+  selectedPetBox: {
+    backgroundColor: "#E4F5E8",
+  },
+
+  selectPetText: {
+    fontSize: 14,
+    fontFamily: "Nanum",
+    color: "#333",
+  },
+
+  selectedPetBoxText: {
+    fontFamily: "NanumB",
+    color: "#2F6B57",
+  },
+  connectedFeederBox: {
+    borderWidth: 1,
+    borderColor: "#DDE7E2",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 10,
+    backgroundColor: "#FFFFFF",
+  },
+
+  connectedFeederName: {
+    fontSize: 15,
+    fontFamily: "NanumB",
+    color: "#111",
+    marginBottom: 4,
+  },
+
+  connectedFeederDesc: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#2F6B57",
   },
 });

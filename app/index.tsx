@@ -14,29 +14,42 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import {
-  getChatApiOrigin,
-  registerUserOnBackend,
-} from "../utils/chatHistoryApi";
+import { storageKeys } from "../utils/storageKeys";
 
-type User = {
-  id: string;
-  email: string;
-  password: string;
-  serverUserId?: number;
+const GO_SERVER_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
+
+type LoginResponse = {
+  id?: number;
+  user_id?: number;
+  userId?: number;
+  email?: string;
+  user?: {
+    id?: number;
+    user_id?: number;
+    userId?: number;
+    email?: string;
+  };
+  data?: {
+    id?: number;
+    user_id?: number;
+    userId?: number;
+    email?: string;
+  };
 };
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [id, setId] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const isFormValid = id.trim() && password.trim();
+  const isFormValid = email.trim() && password.trim();
 
   const handleLogin = async () => {
     try {
-      if (!id.trim()) {
-        Alert.alert("로그인 실패", "아이디를 입력해주세요.");
+      const trimmedEmail = email.trim().toLowerCase();
+
+      if (!trimmedEmail) {
+        Alert.alert("로그인 실패", "이메일을 입력해주세요.");
         return;
       }
 
@@ -45,57 +58,70 @@ export default function LoginScreen() {
         return;
       }
 
-      const savedUsers = await AsyncStorage.getItem("users");
-      const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
-
-      const foundUser = users.find(
-        (user) =>
-          user.id.toLowerCase() === id.trim().toLowerCase() &&
-          user.password === password,
-      );
-
-      if (!foundUser) {
-        Alert.alert("로그인 실패", "아이디 또는 비밀번호가 올바르지 않습니다.");
+      if (!GO_SERVER_URL) {
+        Alert.alert("오류", "서버 주소가 설정되지 않았습니다.");
         return;
       }
 
-      let userToLogin: User = foundUser;
+      const response = await fetch(`${GO_SERVER_URL}/api/v1/users/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          password,
+        }),
+      });
 
-      if (!foundUser.serverUserId && getChatApiOrigin()) {
-        const reg = await registerUserOnBackend({
-          email: foundUser.email,
-          password: foundUser.password,
-        });
-        if (reg.ok) {
-          userToLogin = { ...foundUser, serverUserId: reg.userId };
-          const nextUsers = users.map((u) =>
-            u.email.toLowerCase() === foundUser.email.toLowerCase()
-              ? { ...u, serverUserId: reg.userId }
-              : u,
-          );
-          await AsyncStorage.setItem("users", JSON.stringify(nextUsers));
-        }
-      }
+      const responseText = await response.text();
 
-      if (!userToLogin.serverUserId) {
+      console.log("로그인 응답 원본:", responseText);
+
+      if (!response.ok) {
         Alert.alert(
           "로그인 실패",
-          "서버 사용자 ID가 없습니다. 다시 회원가입해주세요.",
+          responseText || "이메일 또는 비밀번호가 올바르지 않습니다.",
         );
         return;
       }
 
+      let loginResult: LoginResponse | null = null;
+
+      try {
+        loginResult = responseText ? JSON.parse(responseText) : null;
+      } catch {
+        Alert.alert("오류", "서버 응답을 처리하지 못했습니다.");
+        return;
+      }
+
+      const serverUserId =
+        loginResult?.user?.user_id ??
+        loginResult?.user?.id ??
+        loginResult?.user?.userId ??
+        loginResult?.user_id ??
+        loginResult?.id ??
+        loginResult?.userId ??
+        loginResult?.data?.user_id ??
+        loginResult?.data?.id ??
+        loginResult?.data?.userId;
+
+      if (!serverUserId) {
+        Alert.alert("로그인 실패", "서버 사용자 ID를 받을 수 없습니다.");
+        return;
+      }
+
       await AsyncStorage.setItem(
-        "loggedInUser",
+        storageKeys.loggedInUser,
         JSON.stringify({
-          id: userToLogin.id,
-          email: userToLogin.email,
-          serverUserId: userToLogin.serverUserId,
+          email: trimmedEmail,
+          serverUserId: Number(serverUserId),
         }),
       );
 
       const completed = await AsyncStorage.getItem(
-        `profileCompleted_${userToLogin.email}`,
+        storageKeys.profileCompleted(trimmedEmail),
       );
 
       if (completed === "true") {
@@ -120,10 +146,11 @@ export default function LoginScreen() {
 
           <TextInput
             style={styles.input}
-            placeholder="아이디"
+            placeholder="이메일"
             placeholderTextColor="#777"
-            value={id}
-            onChangeText={setId}
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
             autoCapitalize="none"
           />
 
@@ -166,10 +193,6 @@ export default function LoginScreen() {
             </View>
 
             <View style={styles.bottomLinkRow}>
-              <TouchableOpacity onPress={() => router.push("/find-id" as any)}>
-                <Text style={styles.linkText}>아이디 찾기</Text>
-              </TouchableOpacity>
-
               <TouchableOpacity
                 onPress={() => router.push("/find-password" as any)}
               >

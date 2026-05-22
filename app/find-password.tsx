@@ -16,14 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
 
-type User = {
-  id: string;
-  email: string;
-  password: string;
-};
-
 type FieldErrors = {
-  id?: string;
   email?: string;
   newPassword?: string;
   newPasswordConfirm?: string;
@@ -77,7 +70,6 @@ const validateNewPasswordConfirm = (
 export default function FindPasswordScreen() {
   const router = useRouter();
 
-  const [id, setId] = useState("");
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
@@ -86,27 +78,9 @@ export default function FindPasswordScreen() {
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const isFormValid =
-    id.trim() &&
     isValidEmail(email.trim()) &&
     !validateNewPassword(newPassword) &&
     !validateNewPasswordConfirm(newPassword, newPasswordConfirm);
-
-  const handleIdChange = (text: string) => {
-    setId(text);
-
-    if (!text.trim()) {
-      setErrors((prev) => ({
-        ...prev,
-        id: undefined,
-      }));
-      return;
-    }
-
-    setErrors((prev) => ({
-      ...prev,
-      id: undefined,
-    }));
-  };
 
   const handleEmailChange = (text: string) => {
     setEmail(text);
@@ -191,14 +165,9 @@ export default function FindPasswordScreen() {
   };
 
   const validateFields = () => {
-    const trimmedId = id.trim();
     const trimmedEmail = email.trim().toLowerCase();
 
     const newErrors: FieldErrors = {};
-
-    if (!trimmedId) {
-      newErrors.id = "아이디를 입력해주세요.";
-    }
 
     if (!trimmedEmail) {
       newErrors.email = "이메일을 입력해주세요.";
@@ -217,39 +186,45 @@ export default function FindPasswordScreen() {
     return !Object.values(newErrors).some(Boolean);
   };
 
+  const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
+
   const handleResetPassword = async () => {
     try {
-      const trimmedId = id.trim();
       const trimmedEmail = email.trim().toLowerCase();
 
       if (!validateFields()) {
         return;
       }
 
-      const savedUsers = await AsyncStorage.getItem(storageKeys.users);
-      const users: User[] = savedUsers ? JSON.parse(savedUsers) : [];
-
-      const targetIndex = users.findIndex(
-        (user) =>
-          user.id.toLowerCase() === trimmedId.toLowerCase() &&
-          user.email.toLowerCase() === trimmedEmail,
-      );
-
-      if (targetIndex === -1) {
-        Alert.alert("비밀번호 찾기", "일치하는 회원정보가 없습니다.");
+      if (!API_BASE_URL) {
+        Alert.alert("오류", "서버 주소가 설정되지 않았습니다.");
         return;
       }
 
-      if (users[targetIndex].password === newPassword) {
+      const response = await fetch(`${API_BASE_URL}/api/v1/users/password`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({
+          email: trimmedEmail,
+          new_password: newPassword,
+        }),
+      });
+
+      const responseText = await response.text();
+
+      console.log("비밀번호 변경 응답:", responseText);
+
+      if (!response.ok) {
         Alert.alert(
-          "비밀번호 찾기",
-          "이전에 사용하던 비밀번호입니다. 다른 비밀번호를 입력해주세요.",
+          "비밀번호 변경 실패",
+          responseText || "비밀번호 변경에 실패했습니다.",
         );
         return;
       }
 
-      users[targetIndex].password = newPassword;
-      await AsyncStorage.setItem(storageKeys.users, JSON.stringify(users));
       await AsyncStorage.removeItem(storageKeys.loggedInUser);
 
       Alert.alert(
@@ -279,16 +254,6 @@ export default function FindPasswordScreen() {
           showsVerticalScrollIndicator={false}
         >
           <Text style={styles.title}>비밀번호 찾기</Text>
-
-          <TextInput
-            style={[styles.input, errors.id && styles.inputErrorBorder]}
-            placeholder="아이디"
-            placeholderTextColor="#777"
-            value={id}
-            onChangeText={handleIdChange}
-            autoCapitalize="none"
-          />
-          {errors.id ? <Text style={styles.errorText}>{errors.id}</Text> : null}
 
           <TextInput
             style={[styles.input, errors.email && styles.inputErrorBorder]}

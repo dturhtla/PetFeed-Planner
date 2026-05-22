@@ -40,6 +40,7 @@ type FeedingRecord = {
   petId: string;
   date: string;
   foodName: string;
+  foodId?: number;
   amount: string;
   eatenAmount?: string;
   time: string;
@@ -67,6 +68,7 @@ type AlarmItem = {
   hour: string;
   minute: string;
   foodName: string;
+  foodId?: number;
   foodSubLabel: string;
   amount: number;
   days: string[];
@@ -74,6 +76,7 @@ type AlarmItem = {
 };
 
 const DAYS = ["일", "월", "화", "수", "목", "금", "토"];
+const DISPLAY_DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
 function createInitialTime() {
   const date = new Date();
@@ -97,7 +100,7 @@ function matchesDay(alarm: AlarmItem, dayKor: string) {
 function formatAlarmDays(days?: string[]) {
   if (!days || days.length === 0) return "매일";
 
-  const orderedDays = DAYS.filter((day) => days.includes(day));
+  const orderedDays = DISPLAY_DAYS.filter((day) => days.includes(day));
 
   const isEveryday = orderedDays.length === 7;
   const isWeekdays =
@@ -217,6 +220,13 @@ export default function RecordsScreen() {
   const [selectedPetId, setSelectedPetId] = useState<string>("");
 
   const [records, setRecords] = useState<FeedingRecord[]>([]);
+
+  const [todayConsumption, setTodayConsumption] = useState({
+    totalFed: 0,
+    totalConsumption: 0,
+    totalRemaining: 0,
+    consumptionRate: 0,
+  });
 
   const [nearestAlarm, setNearestAlarm] = useState<AlarmItem | null>(null);
   const [hasAnyEnabledAlarm, setHasAnyEnabledAlarm] = useState(false);
@@ -415,6 +425,7 @@ export default function RecordsScreen() {
           const feedAmount = Number(result?.feed_amount ?? 0);
           const consumption = Number(result?.consumption ?? 0);
           const foodName = String(result?.food_name ?? "").trim();
+          const foodId = result?.food_id ?? result?.current_food_id;
 
           if (feedAmount <= 0 && consumption <= 0 && !foodName) return null;
 
@@ -423,6 +434,7 @@ export default function RecordsScreen() {
             petId,
             date: formatDate(),
             foodName: foodName || alarm.foodName,
+            foodId,
             amount: `${feedAmount || alarm.amount}g`,
             eatenAmount: `${consumption}g`,
             time: formatAlarmDisplayTime(alarm),
@@ -439,6 +451,45 @@ export default function RecordsScreen() {
 
     return serverRecords.filter(Boolean) as FeedingRecord[];
   };
+
+  const loadTodayConsumption = useCallback(async (petId: string) => {
+    if (!API_BASE_URL || !petId) return;
+
+    try {
+      const today = formatDate().replace(/\./g, "-");
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/pets/${petId}/consumption?date=${today}`,
+        {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        },
+      );
+
+      if (!response.ok) {
+        console.log("오늘 consumption 조회 실패:", response.status);
+        setTodayConsumption({
+          totalFed: 0,
+          totalConsumption: 0,
+          totalRemaining: 0,
+          consumptionRate: 0,
+        });
+        return;
+      }
+
+      const result = await response.json();
+
+      setTodayConsumption({
+        totalFed: Number(result?.total_fed ?? 0),
+        totalConsumption: Number(result?.total_consumption ?? 0),
+        totalRemaining: Number(result?.total_remaining ?? 0),
+        consumptionRate: Number(result?.consumption_rate ?? 0),
+      });
+    } catch (error) {
+      console.log("loadTodayConsumption error:", error);
+    }
+  }, []);
 
   const loadProfilesAndRecords = useCallback(async () => {
     try {
@@ -457,40 +508,71 @@ export default function RecordsScreen() {
       setUserEmail(email);
 
       // 1. 서버에서 pets 불러오기
-      if (!API_BASE_URL) {
-        show("서버 주소가 설정되지 않았습니다.");
-        return;
-      }
-
-      const petsResponse = await fetch(
-        `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
-        { headers: { "ngrok-skip-browser-warning": "true" } },
-      );
-
       let loadedProfiles: PetProfileItem[] = [];
 
-      if (petsResponse.ok) {
-        const petsResult = await petsResponse.json();
-        const serverPets = Array.isArray(petsResult)
-          ? petsResult
-          : petsResult?.pets || [];
-        loadedProfiles = serverPets
-          .map((pet: any) => ({
-            id: String(pet.pet_id ?? pet.id),
-            name: pet.name,
-            petType:
-              pet.species === "Dog"
-                ? "강아지"
-                : pet.species === "Cat"
-                  ? "고양이"
-                  : "",
-          }))
-          .sort(
-            (a: PetProfileItem, b: PetProfileItem) =>
-              Number(a.id) - Number(b.id),
+      if (API_BASE_URL) {
+        try {
+          const petsResponse = await fetch(
+            `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
+            { headers: { "ngrok-skip-browser-warning": "true" } },
           );
+
+          if (petsResponse.ok) {
+            const petsResult = await petsResponse.json();
+            const serverPets = Array.isArray(petsResult)
+              ? petsResult
+              : petsResult?.pets || [];
+
+            loadedProfiles = serverPets
+              .map((pet: any) => ({
+                id: String(pet.pet_id ?? pet.id),
+                name: pet.name,
+                petType:
+                  pet.species === "Dog"
+                    ? "강아지"
+                    : pet.species === "Cat"
+                      ? "고양이"
+                      : pet.petType || "",
+              }))
+              .filter((pet: PetProfileItem) => pet.id && pet.name)
+              .sort(
+                (a: PetProfileItem, b: PetProfileItem) =>
+                  Number(a.id) - Number(b.id),
+              );
+          } else {
+            console.log("pets 조회 실패:", petsResponse.status);
+          }
+        } catch (error) {
+          console.log("pets 서버 조회 실패:", error);
+        }
+      } else {
+        console.log("서버 주소 없음 - 로컬 프로필 fallback 사용");
       }
 
+      // 서버 조회 실패 또는 서버 데이터 없음 → 로컬 프로필 fallback
+      if (loadedProfiles.length === 0) {
+        const savedProfilesRaw = await AsyncStorage.getItem(
+          storageKeys.petProfiles(email),
+        );
+
+        let localProfiles: any[] = [];
+
+        try {
+          localProfiles = savedProfilesRaw ? JSON.parse(savedProfilesRaw) : [];
+        } catch {
+          localProfiles = [];
+        }
+
+        loadedProfiles = localProfiles
+          .map((profile: any) => ({
+            id: String(profile.serverPetId ?? profile.id),
+            name: profile.name,
+            petType: profile.petType,
+          }))
+          .filter((pet: PetProfileItem) => pet.id && pet.name);
+      }
+
+      // 서버/로컬 모두 없을 때만 placeholder
       if (loadedProfiles.length === 0) {
         loadedProfiles = [
           { id: "placeholder-1", name: "반려동물", petType: "" },
@@ -519,8 +601,10 @@ export default function RecordsScreen() {
           const migratedRecords = parsedRecords.map((record) => {
             const localIndex = Number(record.petId);
             if (!isNaN(localIndex) && localProfiles[localIndex]) {
+              const serverPetId = localProfiles[localIndex]?.serverPetId;
+
               const serverPet = loadedProfiles.find(
-                (p) => p.name === localProfiles[localIndex].name,
+                (p) => String(p.id) === String(serverPetId),
               );
               if (serverPet) return { ...record, petId: serverPet.id };
             }
@@ -533,8 +617,10 @@ export default function RecordsScreen() {
         }
 
         for (let i = 0; i < localProfiles.length; i++) {
+          const serverPetId = localProfiles[i]?.serverPetId;
+
           const serverPet = loadedProfiles.find(
-            (p) => p.name === localProfiles[i].name,
+            (p) => String(p.id) === String(serverPetId),
           );
           if (!serverPet) continue;
 
@@ -673,6 +759,13 @@ export default function RecordsScreen() {
       loadPetAlarms();
     }, [userEmail, selectedPetId]),
   );
+  useFocusEffect(
+    useCallback(() => {
+      if (selectedPetId) {
+        loadTodayConsumption(selectedPetId);
+      }
+    }, [selectedPetId, loadTodayConsumption]),
+  );
 
   const filteredRecords = useMemo(() => {
     return records
@@ -772,21 +865,9 @@ export default function RecordsScreen() {
   );
 
   const todayStats = useMemo(() => {
-    const today = formatDate();
+    const givenAmount = todayConsumption.totalFed;
 
-    const todayRecords = records.filter(
-      (record) => record.petId === selectedPetId && record.date === today,
-    );
-
-    const givenAmount = todayRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.amount),
-      0,
-    );
-
-    const eatenAmount = todayRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.eatenAmount ?? record.amount),
-      0,
-    );
+    const eatenAmount = todayConsumption.totalConsumption;
 
     const missedCount = todayFeedingSchedules.filter((alarm) =>
       isMissedAlarm(alarm),
@@ -797,7 +878,7 @@ export default function RecordsScreen() {
       eatenAmount,
       missedCount,
     };
-  }, [records, selectedPetId, todayFeedingSchedules, isMissedAlarm]);
+  }, [todayConsumption, todayFeedingSchedules, isMissedAlarm]);
 
   const previewAlarm = useMemo(() => {
     return nearestAlarm;
@@ -903,10 +984,23 @@ export default function RecordsScreen() {
       console.log("서버로 보낼 pet_id:", Number(selectedPetId));
       console.log("서버로 보낼 feed_time:", feedTime);
 
+      const selectedFoodId =
+        selectedFood.foodId ??
+        (isNaN(Number(selectedFood.id)) ? undefined : Number(selectedFood.id));
+
+      if (!selectedFoodId) {
+        Alert.alert(
+          "저장 실패",
+          "사료 ID가 없는 사료입니다. 다시 선택해주세요.",
+        );
+        return;
+      }
+
       await requestJson(`${API_BASE_URL}/api/v1/iot/self-manual-weight`, {
         method: "POST",
         body: JSON.stringify({
           pet_id: Number(selectedPetId),
+          food_id: selectedFoodId,
           feed_time: feedTime,
           feed_amount: Number(amount),
           consumption: Number(eatenAmount),
@@ -918,6 +1012,7 @@ export default function RecordsScreen() {
         id: `${now}`,
         petId: selectedPetId,
         date: formatDate(),
+        foodId: selectedFoodId,
         foodName: selectedFood.name,
         amount: `${amount}g`,
         eatenAmount: `${eatenAmount}g`,
@@ -945,6 +1040,8 @@ export default function RecordsScreen() {
         storageKeys.feedingRecords(userEmail),
         JSON.stringify(localRecordsToSave),
       );
+
+      await loadTodayConsumption(selectedPetId);
 
       show("급여 기록이 저장되었습니다.");
       closeAddModal();
@@ -976,28 +1073,22 @@ export default function RecordsScreen() {
         selectedManualRecordIds.includes(record.id),
       );
 
-      await Promise.all(
-        recordsToDelete.map(async (record) => {
-          try {
-            const deleteBody = {
-              pet_id: Number(record.petId),
-              feed_time:
-                record.serverFeedTime ??
-                formatServerDateTime(createDateFromRecord(record)),
-              feed_amount: getGramNumber(record.amount),
-            };
+      for (const record of recordsToDelete) {
+        const deleteBody = {
+          pet_id: Number(record.petId),
+          feed_time:
+            record.serverFeedTime ??
+            formatServerDateTime(createDateFromRecord(record)),
+          feed_amount: getGramNumber(record.amount),
+        };
 
-            console.log("삭제 요청 body:", deleteBody);
+        console.log("삭제 요청 body:", deleteBody);
 
-            await requestJson(`${API_BASE_URL}/api/v1/iot/weight-pair`, {
-              method: "DELETE",
-              body: JSON.stringify(deleteBody),
-            });
-          } catch (error) {
-            console.log("서버 삭제 실패, 로컬 삭제는 계속 진행:", error);
-          }
-        }),
-      );
+        await requestJson(`${API_BASE_URL}/api/v1/iot/weight-pair`, {
+          method: "DELETE",
+          body: JSON.stringify(deleteBody),
+        });
+      }
 
       const updatedRecords = records.filter(
         (record) => !selectedManualRecordIds.includes(record.id),
@@ -1013,6 +1104,8 @@ export default function RecordsScreen() {
         storageKeys.feedingRecords(userEmail),
         JSON.stringify(localRecordsToSave),
       );
+
+      await loadTodayConsumption(selectedPetId);
 
       show("급여 기록이 삭제되었습니다.");
 
@@ -1114,9 +1207,61 @@ export default function RecordsScreen() {
     setIsFoodSheetVisible(true);
   };
 
-  const handleCompleteFoodSelection = () => {
+  const ensureServerFoodId = async (food: FoodItem) => {
+    if (food.foodId) return food;
+
+    if (!API_BASE_URL) {
+      throw new Error("서버 주소가 설정되지 않았습니다.");
+    }
+
+    const response = await requestJson(`${API_BASE_URL}/api/v1/foods`, {
+      method: "POST",
+      body: JSON.stringify({
+        product_name: food.name,
+        kcal_per_g: 0,
+        protein_pct: 0,
+        fat_pct: 0,
+      }),
+    });
+
+    const serverFoodId =
+      response?.food_id ?? response?.id ?? response?.data?.food_id;
+
+    if (!serverFoodId) {
+      throw new Error("food_id를 받지 못했습니다.");
+    }
+
+    const updatedFood: FoodItem = {
+      ...food,
+      id: String(serverFoodId),
+      foodId: Number(serverFoodId),
+    };
+
+    const updatedFoods = foodLibrary.map((item) =>
+      item.id === food.id ? updatedFood : item,
+    );
+
+    setFoodLibrary(updatedFoods);
+
+    if (userEmail && selectedPetId) {
+      await AsyncStorage.setItem(
+        storageKeys.savedFoods(userEmail, selectedPetId),
+        JSON.stringify(updatedFoods),
+      );
+    }
+
+    return updatedFood;
+  };
+
+  const handleCompleteFoodSelection = async () => {
+    if (!tempSelectedFood) {
+      Alert.alert("알림", "사료를 선택해주세요.");
+      return;
+    }
+
     setSelectedFood(tempSelectedFood);
     applyQuickAmountForFood(tempSelectedFood);
+
     setIsFoodSheetVisible(false);
     setIsAddFoodFormVisible(false);
     setNewFoodName("");
@@ -1907,7 +2052,36 @@ export default function RecordsScreen() {
                             isSelected && styles.foodRowSelected,
                           ]}
                           activeOpacity={0.85}
-                          onPress={() => setTempSelectedFood(item)}
+                          onPress={async () => {
+                            try {
+                              const foodWithServerId =
+                                await ensureServerFoodId(item);
+
+                              setTempSelectedFood(foodWithServerId);
+
+                              await requestJson(
+                                `${API_BASE_URL}/api/v1/pets/food`,
+                                {
+                                  method: "PUT",
+                                  body: JSON.stringify({
+                                    pet_id: Number(selectedPetId),
+                                    new_food_id: foodWithServerId.foodId,
+                                  }),
+                                },
+                              );
+
+                              console.log(
+                                "대표 사료 변경 완료:",
+                                foodWithServerId.foodId,
+                              );
+                            } catch (error) {
+                              console.log("대표 사료 변경 실패:", error);
+                              Alert.alert(
+                                "대표 사료 변경 실패",
+                                "대표 사료를 변경하지 못했습니다.",
+                              );
+                            }
+                          }}
                         >
                           <View style={styles.foodRowLeft}>
                             <View

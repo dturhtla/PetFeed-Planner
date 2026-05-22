@@ -26,11 +26,12 @@ type FeedingRecord = {
   petId: string;
   date: string;
   foodName: string;
+  foodId?: number;
   amount: string;
   eatenAmount?: string;
   time: string;
   sortKey?: number;
-  source?: "alarm" | "manual";
+  source?: "alarm" | "manual" | "server";
   alarmId?: string;
 };
 
@@ -55,23 +56,27 @@ function getAlarmSortValue(alarm: AlarmItem) {
 
 function formatAlarmDisplayTime(alarm: AlarmItem) {
   const h = to24Hour(alarm.period, alarm.hour);
-  return `${String(h).padStart(2, "0")}:${alarm.minute}`;
+  const m = String(alarm.minute).padStart(2, "0");
+
+  return `${String(h).padStart(2, "0")}:${m}`;
 }
 
 const show = (msg: string) => {
   ToastAndroid.show(msg, ToastAndroid.SHORT);
 };
 
-function getGramNumber(value?: string | number) {
-  if (value === undefined || value === null) return 0;
-  return Number(String(value).replace(/[^0-9.]/g, "")) || 0;
-}
-
 function formatDateByDot(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}.${m}.${d}`;
+}
+
+function formatDateByHyphen(date: Date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function parseDotDate(dateKey: string) {
@@ -97,7 +102,22 @@ export default function FeedingHistoryScreen() {
   const [alarms, setAlarms] = useState<AlarmItem[]>([]);
   const [petProfiles, setPetProfiles] = useState<PetProfileItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState(petId ?? "");
-  const [records, setRecords] = useState<FeedingRecord[]>([]);
+  const [, setRecords] = useState<FeedingRecord[]>([]);
+  const [serverSessionRecords, setServerSessionRecords] = useState<
+    FeedingRecord[]
+  >([]);
+
+  const [dailyConsumption, setDailyConsumption] = useState({
+    totalFed: 0,
+    totalConsumption: 0,
+    totalRemaining: 0,
+    consumptionRate: 0,
+    statusColor: "green",
+  });
+
+  const [monthlyConsumptionMap, setMonthlyConsumptionMap] = useState<
+    Record<string, string>
+  >({});
 
   const today = new Date();
   const todayKey = formatDateByDot(today); // ⭐ 추가
@@ -247,12 +267,194 @@ export default function FeedingHistoryScreen() {
     }, [userEmail, selectedPetId]),
   );
 
+  const loadDailyConsumption = useCallback(
+    async (targetPetId: string, targetDate: string) => {
+      if (!API_BASE_URL || !targetPetId) return;
+
+      try {
+        const serverDate = targetDate.replace(/\./g, "-");
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/pets/${targetPetId}/consumption?date=${serverDate}`,
+          {
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          console.log("consumption 조회 실패:", response.status);
+
+          setDailyConsumption({
+            totalFed: 0,
+            totalConsumption: 0,
+            totalRemaining: 0,
+            consumptionRate: 0,
+            statusColor: "green",
+          });
+
+          return;
+        }
+
+        const result = await response.json();
+
+        setDailyConsumption({
+          totalFed: Number(result?.total_fed ?? 0),
+          totalConsumption: Number(result?.total_consumption ?? 0),
+          totalRemaining: Number(result?.total_remaining ?? 0),
+          consumptionRate: Number(result?.consumption_rate ?? 0),
+          statusColor: result?.status_color ?? "green",
+        });
+      } catch (error) {
+        console.log("loadDailyConsumption error:", error);
+
+        setDailyConsumption({
+          totalFed: 0,
+          totalConsumption: 0,
+          totalRemaining: 0,
+          consumptionRate: 0,
+          statusColor: "green",
+        });
+      }
+    },
+    [],
+  );
+
+  const loadServerSessions = useCallback(
+    async (targetPetId: string, targetDate: string) => {
+      if (!API_BASE_URL || !targetPetId) return;
+
+      try {
+        const serverDate = targetDate.replace(/\./g, "-");
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/pets/${targetPetId}/sessions?date=${serverDate}`,
+          {
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          console.log("sessions 조회 실패:", response.status);
+          setServerSessionRecords([]);
+          return;
+        }
+
+        const result = await response.json();
+        const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
+
+        const serverRecords: FeedingRecord[] = sessions.map(
+          (session: any, index: number) => {
+            const feedingTime = String(session.feeding_time ?? "");
+            const timeText = feedingTime.includes("T")
+              ? feedingTime.slice(11, 16)
+              : feedingTime.includes(" ")
+                ? feedingTime.slice(11, 16)
+                : feedingTime.slice(0, 5);
+
+            return {
+              id: `server-${targetPetId}-${serverDate}-${index}`,
+              petId: targetPetId,
+              date: targetDate,
+              foodId: session.current_food_id ?? session.food_id,
+              foodName: session.food_name ?? "사료",
+              amount: `${Number(session.fed_amount ?? 0)}g`,
+              eatenAmount: `${Number(session.consumed_amount ?? 0)}g`,
+              time: timeText || "00:00",
+              sortKey:
+                new Date(feedingTime.replace(" ", "T")).getTime() || index,
+              source: "server",
+            };
+          },
+        );
+        setServerSessionRecords(serverRecords);
+      } catch (error) {
+        console.log("loadServerSessions error:", error);
+        setServerSessionRecords([]);
+      }
+    },
+    [],
+  );
+
+  const loadMonthlyConsumption = useCallback(
+    async (targetPetId: string, targetMonth: Date) => {
+      if (!API_BASE_URL || !targetPetId) return;
+
+      try {
+        const year = targetMonth.getFullYear();
+        const month = String(targetMonth.getMonth() + 1).padStart(2, "0");
+
+        const response = await fetch(
+          `${API_BASE_URL}/api/v1/pets/${targetPetId}/monthly-consumption?month=${year}-${month}`,
+          {
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
+          },
+        );
+
+        if (!response.ok) {
+          console.log("monthly-consumption 조회 실패:", response.status);
+          setMonthlyConsumptionMap({});
+          return;
+        }
+
+        const result = await response.json();
+        console.log("monthly-consumption 응답:", result);
+
+        const list = Array.isArray(result)
+          ? result
+          : Array.isArray(result?.data)
+            ? result.data
+            : [];
+
+        const nextMap: Record<string, string> = {};
+
+        list.forEach((item: any) => {
+          const date = String(item.date ?? "");
+          const statusColor = String(item.status_color ?? "");
+
+          if (date && statusColor) {
+            nextMap[date] = statusColor;
+          }
+        });
+
+        console.log("monthly-consumption map:", nextMap);
+        setMonthlyConsumptionMap(nextMap);
+      } catch (error) {
+        console.log("loadMonthlyConsumption error:", error);
+        setMonthlyConsumptionMap({});
+      }
+    },
+    [],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (selectedPetId) {
+        loadMonthlyConsumption(selectedPetId, currentMonth);
+      }
+    }, [selectedPetId, currentMonth, loadMonthlyConsumption]),
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (selectedPetId && selectedDate) {
+        loadServerSessions(selectedPetId, selectedDate);
+        loadDailyConsumption(selectedPetId, selectedDate);
+      }
+    }, [selectedPetId, selectedDate, loadServerSessions, loadDailyConsumption]),
+  );
+
   const selectedDateRecords = useMemo(() => {
-    return records.filter(
+    return serverSessionRecords.filter(
       (record) =>
         record.petId === selectedPetId && record.date === selectedDate,
     );
-  }, [records, selectedPetId, selectedDate]);
+  }, [serverSessionRecords, selectedPetId, selectedDate]);
 
   const selectedDateAlarms = useMemo(() => {
     const selectedDateObj = parseDotDate(selectedDate);
@@ -265,9 +467,20 @@ export default function FeedingHistoryScreen() {
 
   const missedAlarms = useMemo(() => {
     return selectedDateAlarms.filter((alarm) => {
-      const hasRecord = selectedDateRecords.some(
-        (record) => record.source === "alarm" && record.alarmId === alarm.id,
-      );
+      const hasRecord = selectedDateRecords.some((record) => {
+        if (record.source === "alarm" && record.alarmId === alarm.id) {
+          return true;
+        }
+
+        const alarmMinutes = getAlarmSortValue(alarm);
+
+        const [recordHour, recordMinute] = record.time.split(":").map(Number);
+        const recordMinutes = recordHour * 60 + recordMinute;
+
+        return (
+          recordMinutes >= alarmMinutes && recordMinutes <= alarmMinutes + 120
+        );
+      });
 
       if (hasRecord) return false;
 
@@ -285,61 +498,64 @@ export default function FeedingHistoryScreen() {
   }, [selectedDateAlarms, selectedDateRecords, selectedDate]);
 
   const dailyStats = useMemo(() => {
-    const fedAmount = selectedDateRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.amount),
-      0,
-    );
-
-    const missedAmount = missedAlarms.reduce(
-      (sum, alarm) => sum + alarm.amount,
-      0,
-    );
-
-    const targetAmount = fedAmount + missedAmount;
-
-    const eatenAmount = selectedDateRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.eatenAmount ?? record.amount),
-      0,
-    );
-
-    const remainAmount = Math.max(targetAmount - eatenAmount, 0);
-
-    const intakeRate =
-      targetAmount > 0 ? Math.round((eatenAmount / targetAmount) * 100) : 0;
-
-    const iotRecords = selectedDateRecords.filter(
-      (record) => record.source === "alarm",
-    );
-
-    const manualRecords = selectedDateRecords.filter(
-      (record) => record.source === "manual",
-    );
-
-    const iotAmount = iotRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.amount),
-      0,
-    );
-
-    const manualAmount = manualRecords.reduce(
-      (sum, record) => sum + getGramNumber(record.amount),
-      0,
-    );
+    const targetCount = selectedDateAlarms.length;
+    const missedCount = missedAlarms.length;
+    const completedCount = Math.max(targetCount - missedCount, 0);
 
     return {
-      totalAmount: targetAmount,
-      fedAmount,
-      eatenAmount,
-      remainAmount,
-      intakeRate,
-      iotAmount,
-      manualAmount,
-      missedCount: missedAlarms.length,
-      completedCount: selectedDateRecords.length,
-      targetCount: selectedDateRecords.length + missedAlarms.length,
-      iotCount: iotRecords.length,
-      manualCount: manualRecords.length,
+      targetCount,
+      completedCount,
+      missedCount,
     };
-  }, [selectedDateRecords, missedAlarms]);
+  }, [selectedDateAlarms, missedAlarms]);
+
+  const insightMessages = useMemo(() => {
+    const messages: string[] = [];
+
+    const rates = Object.entries(monthlyConsumptionMap)
+      .map(([_, status]) => {
+        if (status === "green") return 95;
+        if (status === "orange") return 80;
+        if (status === "red") return 60;
+        return null;
+      })
+      .filter((v): v is 95 | 80 | 60 => v !== null);
+
+    if (rates.length >= 14) {
+      const recent7 = rates.slice(-7);
+      const prev7 = rates.slice(-14, -7);
+
+      const recentAvg = recent7.reduce((a, b) => a + b, 0) / recent7.length;
+
+      const prevAvg = prev7.reduce((a, b) => a + b, 0) / prev7.length;
+
+      const diff = Math.round(recentAvg - prevAvg);
+
+      if (Math.abs(diff) >= 5) {
+        messages.push(
+          diff > 0
+            ? `최근 7일 섭취율이 이전 기간보다 ${diff}% 증가했어요.`
+            : `최근 7일 섭취율이 이전 기간보다 ${Math.abs(diff)}% 감소했어요.`,
+        );
+      }
+    }
+
+    if (dailyStats.missedCount >= 2) {
+      messages.push("최근 미급여 발생 빈도가 증가하고 있어요.");
+    }
+
+    const redDays = Object.values(monthlyConsumptionMap).filter(
+      (v) => v === "red",
+    ).length;
+
+    if (redDays <= 2) {
+      messages.push("최근 섭취 패턴이 안정적으로 유지되고 있어요.");
+    } else {
+      messages.push("최근 섭취 패턴 변화가 감지되고 있어요.");
+    }
+
+    return messages;
+  }, [monthlyConsumptionMap, dailyStats.missedCount]);
 
   const timelineItems = useMemo(() => {
     const recordItems = selectedDateRecords.map((record) => {
@@ -365,67 +581,17 @@ export default function FeedingHistoryScreen() {
     );
   }, [selectedDateRecords, missedAlarms]);
 
-  const getRateColor = (rate: number) => {
-    if (rate >= 90) return "#2F6B57";
-    if (rate >= 70) return "#D9822B";
-    return "#D14A3A";
-  };
-
-  const getDateIntakeRate = (date: Date) => {
-    const dateKey = formatDateByDot(date);
-
-    const dayRecords = records.filter(
-      (r) => r.petId === selectedPetId && r.date === dateKey,
-    );
-
-    const dateObj = parseDotDate(dateKey);
-    const dayKor = DAYS[dateObj.getDay()];
-
-    const dayAlarms = alarms.filter(
-      (alarm) => alarm.enabled && alarm.days?.includes(dayKor),
-    );
-
-    const missed = dayAlarms.filter((alarm) => {
-      const hasRecord = dayRecords.some(
-        (r) => r.source === "alarm" && r.alarmId === alarm.id,
-      );
-
-      return !hasRecord;
-    });
-
-    const fedAmount = dayRecords.reduce(
-      (sum, r) => sum + getGramNumber(r.amount),
-      0,
-    );
-
-    const missedAmount = missed.reduce((sum, alarm) => sum + alarm.amount, 0);
-
-    const targetAmount = fedAmount + missedAmount;
-
-    const eatenAmount = dayRecords.reduce(
-      (sum, r) => sum + getGramNumber(r.eatenAmount ?? r.amount),
-      0,
-    );
-
-    // ⭐ 기록 자체가 없으면 null 반환
-    if (dayRecords.length === 0 && dayAlarms.length === 0) {
-      return null;
-    }
-
-    // ⭐ 기록은 있는데 섭취율 0%인 경우
-    if (targetAmount <= 0) {
-      return 0;
-    }
-
-    return Math.round((eatenAmount / targetAmount) * 100);
-  };
-
   const getDotColor = (date: Date) => {
-    const rate = getDateIntakeRate(date);
+    const dateKey = formatDateByHyphen(date);
+    const statusColor = monthlyConsumptionMap[dateKey];
 
-    if (rate === null) return null;
+    if (!statusColor) return null;
 
-    return getRateColor(rate);
+    if (statusColor === "green" || statusColor === "초록") return "#2F6B57";
+    if (statusColor === "orange" || statusColor === "주황") return "#D9822B";
+    if (statusColor === "red" || statusColor === "빨강") return "#D14A3A";
+
+    return null;
   };
 
   const calendarDays = useMemo(() => {
@@ -651,6 +817,18 @@ export default function FeedingHistoryScreen() {
           <Text style={styles.legendText}>70% 미만</Text>
         </View>
 
+        <View style={styles.insightBox}>
+          <Text style={styles.insightTitle}>
+            📊 {currentMonth.getMonth() + 1}월 급여 인사이트
+          </Text>
+
+          {insightMessages.map((message, index) => (
+            <Text key={index} style={styles.insightText}>
+              • {message}
+            </Text>
+          ))}
+        </View>
+
         {timelineItems.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyTitle}>
@@ -670,26 +848,37 @@ export default function FeedingHistoryScreen() {
               <Text
                 style={[
                   styles.intakeRateText,
-                  { color: getRateColor(dailyStats.intakeRate) },
+                  {
+                    color:
+                      dailyConsumption.consumptionRate >= 90
+                        ? "#2F6B57"
+                        : dailyConsumption.consumptionRate >= 70
+                          ? "#D9822B"
+                          : "#D14A3A",
+                  },
                 ]}
               >
-                섭취율: {dailyStats.intakeRate}%
+                섭취율: {dailyConsumption.consumptionRate}%
               </Text>
 
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>준 양</Text>
-                <Text style={styles.statValue}>{dailyStats.totalAmount}g</Text>
+                <Text style={styles.statValue}>
+                  {dailyConsumption.totalFed}g
+                </Text>
               </View>
 
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>먹은 양</Text>
-                <Text style={styles.statValue}>{dailyStats.eatenAmount}g</Text>
+                <Text style={styles.statValue}>
+                  {dailyConsumption.totalConsumption}g
+                </Text>
               </View>
 
               <View style={styles.statRowLast}>
                 <Text style={styles.statLabel}>남은 양</Text>
                 <Text style={styles.orangeValue}>
-                  {dailyStats.remainAmount}g
+                  {dailyConsumption.totalRemaining}g
                 </Text>
               </View>
             </View>
@@ -736,7 +925,7 @@ export default function FeedingHistoryScreen() {
                     </View>
 
                     <Text style={styles.timelineAmount}>
-                      {item.record.amount}
+                      {item.record.eatenAmount} / {item.record.amount}
                     </Text>
                   </View>
                 );
@@ -1091,5 +1280,31 @@ const styles = StyleSheet.create({
   },
   timelineRowLast: {
     borderBottomWidth: 0,
+  },
+  insightBox: {
+    backgroundColor: "#FFF5CC",
+    borderWidth: 1,
+    borderColor: "#E6B800",
+    borderStyle: "dashed",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+
+  insightTitle: {
+    fontSize: 13,
+    fontFamily: "NanumB",
+    color: "#333",
+    marginBottom: 8,
+  },
+
+  insightText: {
+    fontSize: 12,
+    fontFamily: "Nanum",
+    color: "#333",
+    lineHeight: 19,
+    marginBottom: 3,
   },
 });
