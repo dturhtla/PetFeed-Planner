@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 export default function RootLayout() {
   const [loaded, error] = useFonts({
     KCC: require("../assets/fonts/KCC-Ganpan.ttf"),
+    NanumR: require("../assets/fonts/NanumSquareRoundR.ttf"),
     Nanum: require("../assets/fonts/NanumSquareRoundB.ttf"),
     NanumB: require("../assets/fonts/NanumSquareRoundEB.ttf"),
   });

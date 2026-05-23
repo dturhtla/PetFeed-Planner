@@ -465,24 +465,36 @@ export default function FeedingHistoryScreen() {
       .sort((a, b) => getAlarmSortValue(a) - getAlarmSortValue(b));
   }, [alarms, selectedDate]);
 
-  const missedAlarms = useMemo(() => {
-    return selectedDateAlarms.filter((alarm) => {
-      const hasRecord = selectedDateRecords.some((record) => {
-        if (record.source === "alarm" && record.alarmId === alarm.id) {
-          return true;
-        }
+  const matchedAlarmIds = useMemo(() => {
+    const usedRecordIds = new Set<string>();
+    const matchedIds = new Set<string>();
 
-        const alarmMinutes = getAlarmSortValue(alarm);
+    selectedDateAlarms.forEach((alarm) => {
+      const alarmMinutes = getAlarmSortValue(alarm);
 
-        const [recordHour, recordMinute] = record.time.split(":").map(Number);
-        const recordMinutes = recordHour * 60 + recordMinute;
+      const matchedRecord = selectedDateRecords.find((record) => {
+        if (usedRecordIds.has(record.id)) return false;
+
+        const [h, m] = record.time.split(":").map(Number);
+        const recordMinutes = h * 60 + m;
 
         return (
           recordMinutes >= alarmMinutes && recordMinutes <= alarmMinutes + 120
         );
       });
 
-      if (hasRecord) return false;
+      if (matchedRecord) {
+        usedRecordIds.add(matchedRecord.id);
+        matchedIds.add(alarm.id);
+      }
+    });
+
+    return matchedIds;
+  }, [selectedDateAlarms, selectedDateRecords]);
+
+  const missedAlarms = useMemo(() => {
+    return selectedDateAlarms.filter((alarm) => {
+      if (matchedAlarmIds.has(alarm.id)) return false;
 
       const alarmDate = parseDotDate(selectedDate);
       alarmDate.setHours(to24Hour(alarm.period, alarm.hour));
@@ -495,19 +507,19 @@ export default function FeedingHistoryScreen() {
 
       return missedBase < new Date();
     });
-  }, [selectedDateAlarms, selectedDateRecords, selectedDate]);
+  }, [selectedDateAlarms, matchedAlarmIds, selectedDate]);
 
   const dailyStats = useMemo(() => {
-    const targetCount = selectedDateAlarms.length;
+    const completedCount = selectedDateRecords.length;
     const missedCount = missedAlarms.length;
-    const completedCount = Math.max(targetCount - missedCount, 0);
+    const targetCount = completedCount + missedCount;
 
     return {
       targetCount,
       completedCount,
       missedCount,
     };
-  }, [selectedDateAlarms, missedAlarms]);
+  }, [selectedDateRecords, missedAlarms]);
 
   const insightMessages = useMemo(() => {
     const messages: string[] = [];

@@ -45,7 +45,7 @@ type FeedingRecord = {
   eatenAmount?: string;
   time: string;
   sortKey?: number;
-  source?: "alarm" | "manual";
+  source?: "alarm" | "manual" | "iot";
   alarmId?: string;
   serverFeedTime?: string;
 };
@@ -170,6 +170,31 @@ function createDateFromAlarm(alarm: AlarmItem) {
 function getGramNumber(value?: string | number) {
   if (value === undefined || value === null) return 0;
   return Number(String(value).replace(/[^0-9.]/g, "")) || 0;
+}
+
+function normalizeTimeForDedupe(time: string) {
+  const [timePart, meridiem] = time.split(" ");
+
+  if (!meridiem) {
+    const [h, m] = timePart.split(":");
+    return `${String(Number(h)).padStart(2, "0")}:${String(Number(m)).padStart(2, "0")}`;
+  }
+
+  const [rawHour, rawMinute] = timePart.split(":");
+  let hour = Number(rawHour);
+  const minute = Number(rawMinute);
+
+  if (meridiem === "PM" && hour !== 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function getRecordDedupeKey(record: FeedingRecord) {
+  const time = normalizeTimeForDedupe(record.time);
+  const amount = getGramNumber(record.amount);
+
+  return `${record.petId}_${record.date}_${time}_${amount}`;
 }
 
 const show = (msg: string) => {
@@ -392,64 +417,84 @@ export default function RecordsScreen() {
   ): Promise<FeedingRecord[]> => {
     if (!API_BASE_URL || !petId) return [];
 
-    const savedAlarms = await AsyncStorage.getItem(
-      storageKeys.feedingAlarms(email, petId),
-    );
-    const parsedAlarms: AlarmItem[] = savedAlarms
-      ? JSON.parse(savedAlarms)
-      : [];
+    try {
+      const today = formatDate().replace(/\./g, "-");
 
-    const todayKor = getTodayKorDay();
-    const todayAlarms = Array.isArray(parsedAlarms)
-      ? parsedAlarms.filter(
-          (alarm) => alarm.enabled && alarm.days?.includes(todayKor),
-        )
-      : [];
+      console.log("sessions 요청 petId:", petId);
+      console.log(
+        "sessions 요청 URL:",
+        `${API_BASE_URL}/api/v1/pets/${petId}/sessions?date=${today}`,
+      );
 
-    const serverRecords = await Promise.all(
-      todayAlarms.map(async (alarm) => {
-        try {
-          const feedTime = formatServerDateTime(createDateFromAlarm(alarm));
+      const response = await fetch(
+        `${API_BASE_URL}/api/v1/pets/${petId}/sessions?date=${today}`,
+        {
+          headers: {
+            "ngrok-skip-browser-warning": "true",
+          },
+        },
+      );
 
-          const result = await requestJson(
-            `${API_BASE_URL}/api/v1/pets/meal-details`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                pet_id: Number(petId),
-                feed_time: feedTime,
-              }),
-            },
-          );
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log("sessions 조회 실패:", response.status);
+        console.log("sessions 에러 내용:", errorText);
 
-          const feedAmount = Number(result?.feed_amount ?? 0);
-          const consumption = Number(result?.consumption ?? 0);
-          const foodName = String(result?.food_name ?? "").trim();
-          const foodId = result?.food_id ?? result?.current_food_id;
+        show("IoT 급여 기록을 불러오지 못했어요.");
+        return [];
+      }
 
-          if (feedAmount <= 0 && consumption <= 0 && !foodName) return null;
+      const result = await response.json();
+      const sessions = Array.isArray(result?.sessions) ? result.sessions : [];
 
-          return {
-            id: `server-${petId}-${feedTime}`,
-            petId,
-            date: formatDate(),
-            foodName: foodName || alarm.foodName,
-            foodId,
-            amount: `${feedAmount || alarm.amount}g`,
-            eatenAmount: `${consumption}g`,
-            time: formatAlarmDisplayTime(alarm),
-            sortKey: createDateFromAlarm(alarm).getTime(),
-            source: "alarm" as const,
-            alarmId: alarm.id,
-          };
-        } catch (error) {
-          console.log("loadIoTRecords meal-details error:", error);
-          return null;
-        }
-      }),
-    );
+      return sessions.map((session: any, index: number) => {
+        const feedingTime = String(session.feeding_time ?? "");
+        const [datePart, timePart] = feedingTime.split(" ");
 
-    return serverRecords.filter(Boolean) as FeedingRecord[];
+        const displayDate = datePart
+          ? datePart.replace(/-/g, ".")
+          : formatDate();
+
+        const displayTime = timePart
+          ? timePart.slice(0, 5)
+          : formatDisplayTime(new Date());
+
+        const rawFeedAmount = Number(
+          session.feed_amount ??
+            session.fed_amount ??
+            session.total_feed_amount ??
+            session.total_fed ??
+            0,
+        );
+
+        const consumedAmount = Number(
+          session.consumed_amount ??
+            session.consumption ??
+            session.total_consumption ??
+            0,
+        );
+
+        const feedAmount = rawFeedAmount > 0 ? rawFeedAmount : consumedAmount;
+
+        return {
+          id: `iot-${petId}-${feedingTime}-${index}`,
+          petId,
+          date: displayDate,
+          foodName: session.food_name || `사료 ID ${session.current_food_id}`,
+          foodId: session.current_food_id,
+          amount: `${feedAmount}g`,
+          eatenAmount: `${consumedAmount}g`,
+          time: displayTime,
+          sortKey: feedingTime ? new Date(feedingTime).getTime() : Date.now(),
+          source: "iot" as const,
+          serverFeedTime: feedingTime,
+        };
+      });
+    } catch (error) {
+      console.log("loadIoTRecords sessions error:", error);
+      show("서버 연결이 불안정해 IoT 기록을 불러오지 못했어요.");
+      return [];
+    }
   };
 
   const loadTodayConsumption = useCallback(async (petId: string) => {
@@ -469,6 +514,8 @@ export default function RecordsScreen() {
 
       if (!response.ok) {
         console.log("오늘 consumption 조회 실패:", response.status);
+        show("오늘 급여 요약을 불러오지 못했어요.");
+
         setTodayConsumption({
           totalFed: 0,
           totalConsumption: 0,
@@ -488,6 +535,7 @@ export default function RecordsScreen() {
       });
     } catch (error) {
       console.log("loadTodayConsumption error:", error);
+      show("서버 연결이 불안정해 통계 정보를 불러오지 못했어요.");
     }
   }, []);
 
@@ -652,9 +700,28 @@ export default function RecordsScreen() {
           }
         }
 
+        const cleanupKeys: string[] = [];
+
+        for (let i = 0; i < localProfiles.length; i++) {
+          cleanupKeys.push(storageKeys.savedFoods(email, i));
+          cleanupKeys.push(storageKeys.feedingAlarms(email, i));
+        }
+
+        await AsyncStorage.multiRemove(cleanupKeys);
+
         await AsyncStorage.setItem(storageKeys.migratedPetId(email), "true");
         console.log("마이그레이션 완료!");
       }
+
+      console.log(
+        "old foods:",
+        await AsyncStorage.getItem(storageKeys.savedFoods(email, 0)),
+      );
+
+      console.log(
+        "old alarms:",
+        await AsyncStorage.getItem(storageKeys.feedingAlarms(email, 0)),
+      );
 
       // 3. 이후 정상 로직
       const savedSelectedPetId = await AsyncStorage.getItem(
@@ -691,7 +758,17 @@ export default function RecordsScreen() {
 
       const iotRecords = await loadIoTRecords(petIdForFoods, email);
 
-      setRecords([...iotRecords, ...manualRecords]);
+      const mergedRecordMap = new Map<string, FeedingRecord>();
+
+      manualRecords.forEach((record) => {
+        mergedRecordMap.set(getRecordDedupeKey(record), record);
+      });
+
+      iotRecords.forEach((record) => {
+        mergedRecordMap.set(getRecordDedupeKey(record), record);
+      });
+
+      setRecords(Array.from(mergedRecordMap.values()));
 
       const savedFoods = await AsyncStorage.getItem(
         storageKeys.savedFoods(email, petIdForFoods),
@@ -778,70 +855,84 @@ export default function RecordsScreen() {
       });
   }, [records, selectedPetId]);
 
-  const manualRecords = useMemo(() => {
+  const todayRecordCards = useMemo(() => {
     const today = formatDate();
 
     return filteredRecords.filter(
-      (record) => record.source === "manual" && record.date === today,
+      (record) =>
+        (record.source === "manual" || record.source === "iot") &&
+        record.date === today,
     );
   }, [filteredRecords]);
 
+  const getRecordSortMinutes = (record: FeedingRecord) => {
+    const [timePart, meridiem] = record.time.split(" ");
+    const [rawHour, rawMinute] = timePart.split(":");
+
+    let hour = Number(rawHour);
+    const minute = Number(rawMinute);
+
+    if (meridiem === "PM" && hour !== 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+
+    return hour * 60 + minute;
+  };
+
   const combinedTimelineItems = useMemo(() => {
-    const alarmItems = todayFeedingSchedules.map((alarm) => ({
-      id: `alarm-${alarm.id}`,
-      type: "alarm" as const,
-      sortMinutes: getAlarmSortValue(alarm),
-      alarm,
-    }));
+    const usedRecordIds = new Set<string>();
 
-    const manualItems = manualRecords.map((record) => {
-      const [timePart, meridiem] = record.time.split(" ");
-      const [rawHour, rawMinute] = timePart.split(":");
-      let hour = Number(rawHour);
-      const minute = Number(rawMinute);
+    const alarmItems = todayFeedingSchedules.map((alarm) => {
+      const alarmMinutes = getAlarmSortValue(alarm);
 
-      if (meridiem === "PM" && hour !== 12) {
-        hour += 12;
-      }
-      if (meridiem === "AM" && hour === 12) {
-        hour = 0;
+      const matchedRecord = todayRecordCards.find((record) => {
+        if (usedRecordIds.has(record.id)) return false;
+
+        const recordMinutes = getRecordSortMinutes(record);
+
+        return Math.abs(recordMinutes - alarmMinutes) <= 30;
+      });
+
+      if (matchedRecord) {
+        usedRecordIds.add(matchedRecord.id);
       }
 
       return {
-        id: `manual-${record.id}`,
-        type: "manual" as const,
-        sortMinutes: hour * 60 + minute,
-        record,
+        id: `alarm-${alarm.id}`,
+        type: "alarm" as const,
+        sortMinutes: alarmMinutes,
+        alarm,
+        matchedRecord,
       };
     });
 
-    return [...alarmItems, ...manualItems].sort(
+    const recordItems = todayRecordCards
+      .filter((record) => !usedRecordIds.has(record.id))
+      .map((record) => ({
+        id: `manual-${record.id}`,
+        type: "manual" as const,
+        sortMinutes: getRecordSortMinutes(record),
+        record,
+      }));
+
+    return [...alarmItems, ...recordItems].sort(
       (a, b) => a.sortMinutes - b.sortMinutes,
     );
-  }, [todayFeedingSchedules, manualRecords]);
+  }, [todayFeedingSchedules, todayRecordCards]);
 
   const selectedPet = useMemo(() => {
     return petProfiles.find((pet) => pet.id === selectedPetId);
   }, [petProfiles, selectedPetId]);
 
-  const getAlarmRecord = useCallback(
-    (alarm: AlarmItem) => {
-      const today = formatDate();
-
-      return records.find(
-        (record) =>
-          record.petId === selectedPetId &&
-          record.date === today &&
-          record.source === "alarm" &&
-          record.alarmId === alarm.id,
-      );
-    },
-    [records, selectedPetId],
-  );
-
   const isFedFromAlarm = useCallback(
-    (alarm: AlarmItem) => Boolean(getAlarmRecord(alarm)),
-    [getAlarmRecord],
+    (alarm: AlarmItem) => {
+      const alarmMinutes = getAlarmSortValue(alarm);
+
+      return todayRecordCards.some((record) => {
+        const recordMinutes = getRecordSortMinutes(record);
+        return Math.abs(recordMinutes - alarmMinutes) <= 30;
+      });
+    },
+    [todayRecordCards],
   );
 
   const isMissedAlarm = useCallback(
@@ -1656,9 +1747,9 @@ export default function RecordsScreen() {
             {combinedTimelineItems.map((item) => {
               if (item.type === "alarm") {
                 const alarm = item.alarm;
-                const alarmRecord = getAlarmRecord(alarm);
+                const alarmRecord = item.matchedRecord;
                 const isDone = Boolean(alarmRecord);
-                const isMissed = isMissedAlarm(alarm);
+                const isMissed = !isDone && isMissedAlarm(alarm);
 
                 return (
                   <TouchableOpacity
@@ -1687,22 +1778,50 @@ export default function RecordsScreen() {
                             isMissed && styles.scheduleTimeMissed,
                           ]}
                         >
-                          {formatAlarmDisplayTime(alarm)}{" "}
-                          {isDone ? "완료" : isMissed ? "미지급" : "예정"}
+                          {formatAlarmDisplayTime(alarm)} 알람{" "}
                           {isDone && alarmRecord
-                            ? ` (${normalizeRecordTime(alarmRecord.time)} 급여)`
-                            : ""}
+                            ? `(${normalizeRecordTime(alarmRecord.time)} 완료)`
+                            : isMissed
+                              ? "(미지급)"
+                              : "(예정)"}
                         </Text>
                       </View>
 
                       <Text style={styles.scheduleFoodSimple}>
-                        {alarm.foodName}
+                        {isDone && alarmRecord ? (
+                          <>
+                            <Text style={styles.plannedFoodText}>
+                              예정: {alarm.foodName}
+                            </Text>
+
+                            {" / "}
+
+                            <Text style={styles.scheduleFoodSimple}>
+                              실급여: {alarmRecord.foodName}
+                            </Text>
+                          </>
+                        ) : (
+                          alarm.foodName
+                        )}
                       </Text>
 
                       <Text style={styles.scheduleSubSimple}>
-                        {isDone && alarmRecord
-                          ? `급여량 ${alarmRecord.amount}, 섭취량 ${alarmRecord.eatenAmount ?? alarmRecord.amount}`
-                          : `${alarm.amount}g`}
+                        {isDone && alarmRecord ? (
+                          <>
+                            <Text style={styles.plannedAmountText}>
+                              예정량 {alarm.amount}g
+                            </Text>
+                            {" / "}
+                            실급여량 {alarmRecord.amount}, 섭취량{" "}
+                            {alarmRecord.eatenAmount ?? alarmRecord.amount}
+                          </>
+                        ) : (
+                          <>
+                            <Text style={styles.plannedAmountText}>
+                              예정량 {alarm.amount}g
+                            </Text>
+                          </>
+                        )}
                       </Text>
                     </View>
 
@@ -1757,8 +1876,7 @@ export default function RecordsScreen() {
                   <View style={styles.scheduleInnerSimple}>
                     <View style={styles.recordHeaderRow}>
                       <Text style={styles.scheduleTimeSimple}>
-                        {normalizeRecordTime(record.time)} 완료 (
-                        {normalizeRecordTime(record.time)} 급여)
+                        {normalizeRecordTime(record.time)} 완료
                       </Text>
                     </View>
 
@@ -2796,6 +2914,17 @@ const styles = StyleSheet.create({
     fontFamily: "NanumB",
     color: "#222222",
     marginBottom: 4,
+  },
+  plannedFoodText: {
+    fontSize: 17,
+    fontFamily: "NanumR",
+    color: "#222222",
+  },
+
+  plannedAmountText: {
+    fontSize: 12,
+    fontFamily: "NanumR",
+    color: "#9A9A9A",
   },
   scheduleSubSimple: {
     fontSize: 12,

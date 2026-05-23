@@ -15,10 +15,20 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { storageKeys } from "../utils/storageKeys";
+
 type Pet = {
   id: string;
   name: string;
   petType?: "강아지" | "고양이" | "";
+};
+
+type ConnectedFeeder = {
+  id: string;
+  name: string;
+  feederId: string;
+  connected: boolean;
+  assignedPetId: string;
+  assignedPetName: string;
 };
 
 const menuList = [
@@ -28,6 +38,7 @@ const menuList = [
 ];
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
+const getFeederStorageKey = (email: string) => `iotFeeders_${email}`;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -45,7 +56,9 @@ export default function HomeScreen() {
 
   const [selectedFeeder, setSelectedFeeder] = useState<any>(null);
 
-  const [connectedFeeders, setConnectedFeeders] = useState<any[]>([]);
+  const [connectedFeeders, setConnectedFeeders] = useState<ConnectedFeeder[]>(
+    [],
+  );
   const [selectedConnectPetId, setSelectedConnectPetId] = useState<
     string | null
   >(null);
@@ -73,6 +86,21 @@ export default function HomeScreen() {
 
       const parsedUser = JSON.parse(savedUser);
       const email = parsedUser.email;
+
+      const savedFeeders = await AsyncStorage.getItem(
+        getFeederStorageKey(email),
+      );
+
+      if (savedFeeders) {
+        try {
+          const parsedFeeders = JSON.parse(savedFeeders);
+          setConnectedFeeders(
+            Array.isArray(parsedFeeders) ? parsedFeeders : [],
+          );
+        } catch {
+          setConnectedFeeders([]);
+        }
+      }
 
       const serverUserId = parsedUser.serverUserId;
 
@@ -536,7 +564,11 @@ export default function HomeScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.connectButton}
+                style={[
+                  styles.connectButton,
+                  !selectedConnectPetId && { backgroundColor: "#BDBDBD" },
+                ]}
+                disabled={!selectedConnectPetId}
                 onPress={() => {
                   const connectPet =
                     pets.find((pet) => pet.id === selectedConnectPetId) ??
@@ -544,15 +576,70 @@ export default function HomeScreen() {
 
                   if (!selectedFeeder || !connectPet) return;
 
-                  setConnectedFeeders((prev) => [
-                    ...prev,
-                    {
-                      ...selectedFeeder,
+                  const saveConnection = async () => {
+                    const savedUser = await AsyncStorage.getItem(
+                      storageKeys.loggedInUser,
+                    );
+                    if (!savedUser) return;
+
+                    const parsedUser = JSON.parse(savedUser);
+                    const email = parsedUser.email;
+
+                    if (!API_BASE_URL) {
+                      ToastAndroid.show(
+                        "서버 주소가 설정되지 않았습니다.",
+                        ToastAndroid.SHORT,
+                      );
+                      return;
+                    }
+
+                    const activePetResponse = await fetch(
+                      `${API_BASE_URL}/api/v1/config/active-pet`,
+                      {
+                        method: "PUT",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "ngrok-skip-browser-warning": "true",
+                        },
+                        body: JSON.stringify({
+                          pet_id: Number(connectPet.id),
+                        }),
+                      },
+                    );
+
+                    if (!activePetResponse.ok) {
+                      ToastAndroid.show(
+                        "급여기 연결에 실패했습니다.",
+                        ToastAndroid.SHORT,
+                      );
+                      return;
+                    }
+
+                    const newFeeder: ConnectedFeeder = {
+                      id: selectedFeeder.id,
+                      name: selectedFeeder.name,
+                      feederId: `feeder_${selectedFeeder.id}`,
                       connected: true,
                       assignedPetId: connectPet.id,
                       assignedPetName: connectPet.name,
-                    },
-                  ]);
+                    };
+
+                    const nextFeeders = [...connectedFeeders, newFeeder];
+
+                    setConnectedFeeders(nextFeeders);
+
+                    await AsyncStorage.setItem(
+                      getFeederStorageKey(email),
+                      JSON.stringify(nextFeeders),
+                    );
+
+                    ToastAndroid.show(
+                      `${connectPet.name}와 급여기가 연결되었습니다.`,
+                      ToastAndroid.SHORT,
+                    );
+                  };
+
+                  saveConnection();
 
                   setIotDetailVisible(false);
 
