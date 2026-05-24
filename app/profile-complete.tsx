@@ -33,16 +33,16 @@ type LoggedInUser = {
   serverUserId?: number;
 };
 
-const parseAgeToMonths = (age?: string) => {
-  if (!age) return 0;
-
+const ageToBirthDate = (age?: string) => {
+  if (!age) return "2024-01-01";
   const yearMatch = age.match(/(\d+)\s*년/);
   const monthMatch = age.match(/(\d+)\s*개월/);
-
   const years = yearMatch ? Number(yearMatch[1]) : 0;
   const months = monthMatch ? Number(monthMatch[1]) : 0;
-
-  return years * 12 + months;
+  const now = new Date();
+  now.setFullYear(now.getFullYear() - years);
+  now.setMonth(now.getMonth() - months);
+  return now.toISOString().split("T")[0];
 };
 
 const getGenderValue = (gender?: string) => {
@@ -66,21 +66,19 @@ const diseaseMap: Record<string, string> = {
 const getBcsScore = (bcs?: string) => {
   const bcsMap: Record<string, number> = {
     "심한 저체중": 1,
-    저체중: 2,
-    정상: 3,
-    과체중: 4,
-    비만: 5,
+    저체중: 3,
+    정상: 5,
+    과체중: 7,
+    비만: 9,
   };
-
-  return bcs ? bcsMap[bcs] || 3 : 3;
+  return bcs ? bcsMap[bcs] || 5 : 5;
 };
 
 const getHealthStatusValue = (diseases?: string[]) => {
-  if (!diseases || diseases.length === 0) return "none";
-
-  const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
-
-  return mapped[0] || "none";
+  if (!diseases || diseases.length === 0) return [];
+  return diseases
+    .map((disease) => diseaseMap[disease])
+    .filter((item): item is string => Boolean(item));
 };
 
 const show = (msg: string) => {
@@ -102,7 +100,6 @@ export default function ProfileCompleteScreen() {
       if (!parsedUser?.email) return;
 
       const email = parsedUser.email;
-
       const profilesKey = storageKeys.petProfiles(email);
       const savedProfiles = await AsyncStorage.getItem(profilesKey);
 
@@ -171,7 +168,6 @@ export default function ProfileCompleteScreen() {
       }
 
       const email = parsedUser.email;
-
       let isAllSuccess = true;
 
       if (!parsedUser?.serverUserId) {
@@ -185,7 +181,6 @@ export default function ProfileCompleteScreen() {
       }
 
       for (const profile of profiles) {
-        // profile.tsx에서 이미 서버에 등록된 펫은 중복 등록 방지
         if (profile.serverPetId) {
           console.log(
             "profile-complete: 이미 등록된 펫 skip:",
@@ -199,13 +194,12 @@ export default function ProfileCompleteScreen() {
         const petData = {
           user_id: Number(parsedUser.serverUserId),
           name: profile.name || "",
-          age: parseAgeToMonths(profile.age),
+          birth_date: ageToBirthDate(profile.age),
           species: profile.petType === "고양이" ? "Cat" : "Dog",
           breed: "none",
           gender: getGenderValue(profile.gender),
           current_weight: Number(profile.weight) || 0,
           bcs_score: getBcsScore(profile.bcs),
-          diseases: profile.diseases || [],
           health_status: getHealthStatusValue(profile.diseases),
         };
 
@@ -231,15 +225,12 @@ export default function ProfileCompleteScreen() {
         }
 
         const data = responseText ? JSON.parse(responseText) : null;
-
         profile.serverPetId = data?.pet_id ?? data?.id;
-
         console.log("반려동물 등록되었습니다.:", data);
       }
 
       if (isAllSuccess) {
         const updatedProfiles = [...profiles];
-
         setProfiles(updatedProfiles);
 
         await AsyncStorage.setItem(
@@ -248,7 +239,6 @@ export default function ProfileCompleteScreen() {
         );
 
         await AsyncStorage.setItem(storageKeys.profileCompleted(email), "true");
-
         await AsyncStorage.removeItem(storageKeys.petProfileFlowMode(email));
 
         show("프로필이 저장되었습니다");
@@ -270,7 +260,6 @@ export default function ProfileCompleteScreen() {
     if (petType === "고양이") {
       return <Ionicons name="logo-octocat" size={30} color="#111111" />;
     }
-
     return <Ionicons name="paw" size={30} color="#111111" />;
   };
 

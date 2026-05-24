@@ -42,16 +42,16 @@ type ProfileData = {
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_GO_SERVER_URL;
 
-const parseAgeToMonths = (age?: string) => {
-  if (!age) return 0;
-
+const ageToBirthDate = (age?: string) => {
+  if (!age) return "2024-01-01";
   const yearMatch = age.match(/(\d+)\s*년/);
   const monthMatch = age.match(/(\d+)\s*개월/);
-
   const years = yearMatch ? Number(yearMatch[1]) : 0;
   const months = monthMatch ? Number(monthMatch[1]) : 0;
-
-  return years * 12 + months;
+  const now = new Date();
+  now.setFullYear(now.getFullYear() - years);
+  now.setMonth(now.getMonth() - months);
+  return now.toISOString().split("T")[0];
 };
 
 const getGenderValue = (gender?: string) => {
@@ -63,13 +63,12 @@ const getGenderValue = (gender?: string) => {
 const getBcsScore = (bcs?: string) => {
   const bcsMap: Record<string, number> = {
     "심한 저체중": 1,
-    저체중: 2,
-    정상: 3,
-    과체중: 4,
-    비만: 5,
+    저체중: 3,
+    정상: 5,
+    과체중: 7,
+    비만: 9,
   };
-
-  return bcs ? bcsMap[bcs] || 3 : 3;
+  return bcs ? bcsMap[bcs] || 5 : 5;
 };
 
 const diseaseMap: Record<string, string> = {
@@ -116,7 +115,6 @@ export default function DiseaseCheckScreen() {
   }>();
 
   const isProfileEdit = params?.returnTo === "profileEdit";
-
   const [flowMode, setFlowMode] = useState<ProfileEntryMode>("signup");
 
   const [selectedDiseases, setSelectedDiseases] = useState<string[]>(
@@ -317,7 +315,7 @@ export default function DiseaseCheckScreen() {
         const petData = {
           user_id: Number(parsedUser.serverUserId),
           name: finalProfile.name || "",
-          age: parseAgeToMonths(finalProfile.age),
+          birth_date: ageToBirthDate(finalProfile.age),
           species: finalProfile.petType === "고양이" ? "Cat" : "Dog",
           breed: "none",
           gender: getGenderValue(finalProfile.gender),
@@ -459,13 +457,13 @@ const styles = StyleSheet.create({
     fontFamily: "NanumB",
     color: "#2F6B57",
     textAlign: "center",
-    marginTop: 55, // 추가/증가
+    marginTop: 55,
     marginBottom: 120,
   },
   gridArea: {
     flex: 1,
     justifyContent: "center",
-    marginTop: 20, // 추가
+    marginTop: 20,
   },
   grid: {
     flexDirection: "row",
@@ -520,30 +518,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     position: "relative",
   },
-
   headerSide: {
     width: 48,
     alignItems: "center",
     justifyContent: "center",
   },
-
   headerCenter: {
     flex: 1,
   },
-
   headerTitle: {
     fontSize: 20,
     fontFamily: "NanumB",
     color: "#2F6B57",
   },
-
   line: {
     height: 1,
     backgroundColor: "#777",
     opacity: 0.5,
     marginTop: -4,
   },
-
   backButton: {
     position: "absolute",
     left: 18,

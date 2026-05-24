@@ -45,6 +45,7 @@ type FeedingRecommendation = {
   daily_kcal: number;
   recommendation: string;
   ingredient_warnings: string[];
+  alternative_food?: string | null;
 };
 
 const parseAge = (ageStr: string) => {
@@ -678,6 +679,15 @@ export default function AnalysisResultScreen() {
           ) : (
             <Text style={styles.desc}>• 위험 성분이 없습니다.</Text>
           )}
+
+          {feeding?.alternative_food ? (
+           <>
+             <Text style={[styles.desc, { fontWeight: "800", color: "#2F6B57", marginTop: 8 }]}>
+               • 대체 사료 추천
+             </Text>
+             <Text style={styles.desc}>{feeding.alternative_food}</Text>
+           </>
+          ) : null}
         </View>
 
         <TouchableOpacity
