@@ -24,6 +24,7 @@ type User = {
 
 type PetProfile = {
   id?: string | number;
+  serverPetId?: string | number;
   name?: string;
   age?: string;
   weight?: string;
@@ -39,6 +40,36 @@ export default function DeleteAccountScreen() {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [isDeleting, setIsDeleting] = useState(false);
+
+  const verifyPasswordBeforeDelete = async (
+    email: string,
+    inputPassword: string,
+  ) => {
+    if (!API_BASE_URL) {
+      throw new Error("서버 주소가 설정되지 않았습니다.");
+    }
+
+    const response = await fetch(`${API_BASE_URL}/api/v1/users/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      },
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password: inputPassword.trim(),
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status >= 500) {
+        throw new Error("서버 연결 실패");
+      }
+
+      return false;
+    }
+    return true;
+  };
 
   const executeDelete = async () => {
     if (isDeleting) return;
@@ -113,15 +144,21 @@ export default function DeleteAccountScreen() {
         : [];
 
       for (let i = 0; i < parsedProfiles.length; i++) {
-        const petId = String(parsedProfiles[i].id ?? i + 1);
+        const profile = parsedProfiles[i];
 
-        await AsyncStorage.removeItem(
-          storageKeys.feedingAlarms(currentUser.email, petId),
-        );
+        const petIdsToRemove = [profile.id, profile.serverPetId, i, i + 1]
+          .filter((id) => id !== undefined && id !== null)
+          .map((id) => String(id));
 
-        await AsyncStorage.removeItem(
-          storageKeys.savedFoods(currentUser.email, petId),
-        );
+        for (const petId of petIdsToRemove) {
+          await AsyncStorage.removeItem(
+            storageKeys.feedingAlarms(currentUser.email, petId),
+          );
+
+          await AsyncStorage.removeItem(
+            storageKeys.savedFoods(currentUser.email, petId),
+          );
+        }
       }
 
       // 혹시 예전 구조/단일 프로필 구조에서 남아 있을 수 있는 key도 같이 제거
@@ -194,6 +231,16 @@ export default function DeleteAccountScreen() {
         return;
       }
 
+      const isPasswordValid = await verifyPasswordBeforeDelete(
+        currentUser.email.trim().toLowerCase(),
+        password.trim(),
+      );
+
+      if (!isPasswordValid) {
+        Alert.alert("비밀번호 불일치", "비밀번호가 올바르지 않습니다.");
+        return;
+      }
+
       Alert.alert(
         "정말 탈퇴하시겠습니까?",
         "계정을 삭제하면 모든 정보가 복구되지 않습니다.",
@@ -209,9 +256,10 @@ export default function DeleteAccountScreen() {
           },
         ],
       );
-    } catch (error) {
+    } catch (error: any) {
       console.log(error);
-      Alert.alert("오류", "탈퇴 처리 중 문제가 발생했습니다.");
+
+      Alert.alert("서버 오류", "비밀번호를 확인하는 중 문제가 발생했습니다.");
     }
   };
 

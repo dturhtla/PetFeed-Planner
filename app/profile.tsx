@@ -88,11 +88,11 @@ const diseaseMap: Record<string, string> = {
 };
 
 const getHealthStatusValue = (diseases?: string[]) => {
-  if (!diseases || diseases.length === 0) return "none";
+  if (!diseases || diseases.length === 0) return [];
 
-  const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
-
-  return mapped[0] || "none";
+  return diseases
+    .map((disease) => diseaseMap[disease])
+    .filter((item): item is string => Boolean(item));
 };
 
 const getBcsScore = (bcs?: string) => {
@@ -690,11 +690,9 @@ export default function ProfileScreen() {
         name: finalProfile.name,
         age: parseAgeToMonths(finalProfile.age),
         species: finalProfile.petType === "고양이" ? "Cat" : "Dog",
-        breed: "none",
         gender: getGenderValue(finalProfile.gender),
         current_weight: Number(finalProfile.weight) || 0,
         bcs_score: getBcsScore(finalProfile.bcs),
-        diseases: finalProfile.diseases || [],
         health_status: getHealthStatusValue(finalProfile.diseases),
       };
 

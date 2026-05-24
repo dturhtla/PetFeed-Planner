@@ -190,11 +190,64 @@ function normalizeTimeForDedupe(time: string) {
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
-function getRecordDedupeKey(record: FeedingRecord) {
-  const time = normalizeTimeForDedupe(record.time);
-  const amount = getGramNumber(record.amount);
+function getRecordMinutes(record: FeedingRecord) {
+  const [hour, minute] = normalizeTimeForDedupe(record.time)
+    .split(":")
+    .map(Number);
 
-  return `${record.petId}_${record.date}_${time}_${amount}`;
+  return hour * 60 + minute;
+}
+
+function normalizeFoodName(name?: string) {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function isSameFood(a: FeedingRecord, b: FeedingRecord) {
+  if (a.foodId && b.foodId) {
+    return Number(a.foodId) === Number(b.foodId);
+  }
+
+  return normalizeFoodName(a.foodName) === normalizeFoodName(b.foodName);
+}
+
+function isDuplicateManualAndIot(a: FeedingRecord, b: FeedingRecord) {
+  if (a.petId !== b.petId) return false;
+  if (a.date !== b.date) return false;
+  if (getGramNumber(a.amount) !== getGramNumber(b.amount)) return false;
+  if (!isSameFood(a, b)) return false;
+
+  const isManualIotPair =
+    (a.source === "manual" && b.source === "iot") ||
+    (a.source === "iot" && b.source === "manual");
+
+  if (!isManualIotPair) return false;
+
+  const timeDiff = Math.abs(getRecordMinutes(a) - getRecordMinutes(b));
+
+  return timeDiff <= 5;
+}
+
+function mergeFeedingRecords(
+  manualRecords: FeedingRecord[],
+  iotRecords: FeedingRecord[],
+) {
+  const merged = [...manualRecords];
+
+  for (const iotRecord of iotRecords) {
+    const duplicateIndex = merged.findIndex((record) =>
+      isDuplicateManualAndIot(record, iotRecord),
+    );
+
+    if (duplicateIndex >= 0) {
+      merged[duplicateIndex] = iotRecord;
+    } else {
+      merged.push(iotRecord);
+    }
+  }
+
+  return merged;
 }
 
 const show = (msg: string) => {
@@ -758,17 +811,9 @@ export default function RecordsScreen() {
 
       const iotRecords = await loadIoTRecords(petIdForFoods, email);
 
-      const mergedRecordMap = new Map<string, FeedingRecord>();
+      const mergedRecords = mergeFeedingRecords(manualRecords, iotRecords);
 
-      manualRecords.forEach((record) => {
-        mergedRecordMap.set(getRecordDedupeKey(record), record);
-      });
-
-      iotRecords.forEach((record) => {
-        mergedRecordMap.set(getRecordDedupeKey(record), record);
-      });
-
-      setRecords(Array.from(mergedRecordMap.values()));
+      setRecords(mergedRecords);
 
       const savedFoods = await AsyncStorage.getItem(
         storageKeys.savedFoods(email, petIdForFoods),
@@ -1124,7 +1169,7 @@ export default function RecordsScreen() {
       setRecords(updatedRecords);
 
       const localRecordsToSave = updatedRecords.filter(
-        (record) => record.source !== "alarm",
+        (record) => record.source === "manual",
       );
 
       await AsyncStorage.setItem(
@@ -1188,7 +1233,7 @@ export default function RecordsScreen() {
       setRecords(updatedRecords);
 
       const localRecordsToSave = updatedRecords.filter(
-        (record) => record.source !== "alarm",
+        (record) => record.source === "manual",
       );
 
       await AsyncStorage.setItem(

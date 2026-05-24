@@ -73,6 +73,50 @@ export default function HomeScreen() {
     return <Ionicons name="paw" size={size} color="#111" />;
   };
 
+  const loadLocalPets = async (email: string): Promise<Pet[]> => {
+    const savedLocalProfiles = await AsyncStorage.getItem(
+      storageKeys.petProfiles(email),
+    );
+
+    let localProfiles: any[] = [];
+
+    try {
+      localProfiles = savedLocalProfiles ? JSON.parse(savedLocalProfiles) : [];
+    } catch {
+      localProfiles = [];
+    }
+
+    return localProfiles
+      .map((profile: any) => ({
+        id: String(profile.serverPetId ?? profile.id),
+        name: profile.name,
+        petType: profile.petType,
+      }))
+      .filter((pet: Pet) => pet.id && pet.name);
+  };
+
+  const applyPets = async (email: string, nextPets: Pet[]) => {
+    setPets(nextPets);
+
+    if (nextPets.length === 0) {
+      setSelectedPetId(null);
+      return;
+    }
+
+    const savedPetId = await AsyncStorage.getItem(
+      storageKeys.selectedPetId(email),
+    );
+
+    if (savedPetId && nextPets.some((pet) => pet.id === savedPetId)) {
+      setSelectedPetId(savedPetId);
+      return;
+    }
+
+    const firstPetId = nextPets[0].id;
+    setSelectedPetId(firstPetId);
+    await AsyncStorage.setItem(storageKeys.selectedPetId(email), firstPetId);
+  };
+
   const loadSelectedPet = useCallback(async () => {
     try {
       const savedUser = await AsyncStorage.getItem(storageKeys.loggedInUser);
@@ -104,113 +148,72 @@ export default function HomeScreen() {
 
       const serverUserId = parsedUser.serverUserId;
 
-      if (!serverUserId) {
-        setPets([]);
-        setSelectedPetId(null);
-        return;
-      }
-
-      if (!API_BASE_URL) {
-        setPets([]);
-        setSelectedPetId(null);
+      if (!serverUserId || !API_BASE_URL) {
+        const localPets = await loadLocalPets(email);
+        await applyPets(email, localPets);
         ToastAndroid.show(
-          "서버 주소가 설정되지 않았습니다.",
+          "저장된 반려동물 정보를 표시합니다.",
           ToastAndroid.SHORT,
         );
         return;
       }
 
-      const petsResponse = await fetch(
-        `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
-        {
-          headers: {
-            "ngrok-skip-browser-warning": "true",
+      try {
+        const petsResponse = await fetch(
+          `${API_BASE_URL}/api/v1/users/${serverUserId}/pets`,
+          {
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
           },
-        },
-      );
+        );
 
-      if (!petsResponse.ok) {
-        setPets([]);
-        setSelectedPetId(null);
+        if (!petsResponse.ok) {
+          throw new Error(`pets 조회 실패: ${petsResponse.status}`);
+        }
+
+        const petsResult = await petsResponse.json();
+
+        const serverPets = Array.isArray(petsResult)
+          ? petsResult
+          : petsResult?.pets || [];
+
+        const loadedPets: Pet[] = [...serverPets]
+          .sort((a: any, b: any) => {
+            const aId = Number(a.pet_id ?? a.id ?? 0);
+            const bId = Number(b.pet_id ?? b.id ?? 0);
+            return aId - bId;
+          })
+          .map((pet: any) => ({
+            id: String(pet.pet_id ?? pet.id),
+            name: pet.name,
+            petType:
+              pet.species === "Dog"
+                ? "강아지"
+                : pet.species === "Cat"
+                  ? "고양이"
+                  : pet.petType,
+          }))
+          .filter((pet: Pet) => pet.id && pet.name);
+
+        if (loadedPets.length > 0) {
+          await applyPets(email, loadedPets);
+          return;
+        }
+
+        const localPets = await loadLocalPets(email);
+        await applyPets(email, localPets);
+      } catch (error) {
+        console.log("pets 서버 조회 실패:", error);
+
+        const localPets = await loadLocalPets(email);
+        await applyPets(email, localPets);
+
         ToastAndroid.show(
-          "반려동물 정보를 불러오는 중 문제가 발생했어요.",
+          "서버 연결이 불안정해 저장된 정보를 표시합니다.",
           ToastAndroid.SHORT,
         );
-        return;
       }
-
-      let petsResult;
-      try {
-        petsResult = await petsResponse.json();
-      } catch {
-        ToastAndroid.show(
-          "반려동물 데이터를 처리하는 중 문제가 발생했어요.",
-          ToastAndroid.SHORT,
-        );
-        return;
-      }
-      const serverPets = Array.isArray(petsResult)
-        ? petsResult
-        : petsResult?.pets || [];
-
-      const orderedServerPets = [...serverPets].sort((a: any, b: any) => {
-        const aId = Number(a.pet_id ?? a.id ?? 0);
-        const bId = Number(b.pet_id ?? b.id ?? 0);
-        return aId - bId;
-      });
-
-      const loadedPets: Pet[] = orderedServerPets.map((pet: any) => ({
-        id: String(pet.pet_id ?? pet.id),
-        name: pet.name,
-        petType:
-          pet.species === "Dog"
-            ? "강아지"
-            : pet.species === "Cat"
-              ? "고양이"
-              : pet.petType,
-      }));
-
-      const savedLocalProfiles = await AsyncStorage.getItem(
-        storageKeys.petProfiles(email),
-      );
-
-      let localProfiles = [];
-
-      try {
-        localProfiles = savedLocalProfiles
-          ? JSON.parse(savedLocalProfiles)
-          : [];
-      } catch {
-        localProfiles = [];
-      }
-
-      const localPets: Pet[] = localProfiles.map((profile: any) => ({
-        id: String(profile.serverPetId ?? profile.id),
-        name: profile.name,
-        petType: profile.petType,
-      }));
-
-      const displayPets = loadedPets.length > 0 ? loadedPets : localPets;
-
-      setPets(displayPets);
-
-      if (displayPets.length === 0) {
-        setSelectedPetId(null);
-        return;
-      }
-
-      const savedPetId = await AsyncStorage.getItem(
-        storageKeys.selectedPetId(email),
-      );
-
-      if (savedPetId && displayPets.some((pet) => pet.id === savedPetId)) {
-        setSelectedPetId(savedPetId);
-        return;
-      }
-
-      const firstPetId = displayPets[0].id;
-      setSelectedPetId(firstPetId);
-      await AsyncStorage.setItem(storageKeys.selectedPetId(email), firstPetId);
     } catch (error) {
       console.log("loadSelectedPet error:", error);
       ToastAndroid.show(
@@ -607,9 +610,15 @@ export default function HomeScreen() {
                       },
                     );
 
+                    console.log("active-pet 상태:", activePetResponse.status);
+
+                    const responseText = await activePetResponse.text();
+
+                    console.log("active-pet 응답:", responseText);
+
                     if (!activePetResponse.ok) {
                       ToastAndroid.show(
-                        "급여기 연결에 실패했습니다.",
+                        `급여기 연결 실패 (${activePetResponse.status})`,
                         ToastAndroid.SHORT,
                       );
                       return;
