@@ -85,11 +85,11 @@ const diseaseMap: Record<string, string> = {
 };
 
 const getHealthStatusValue = (diseases?: string[]) => {
-  if (!diseases || diseases.length === 0) return "none";
+  if (!diseases || diseases.length === 0) return [];
 
-  const mapped = diseases.map((disease) => diseaseMap[disease]).filter(Boolean);
-
-  return mapped[0] || "none";
+  return diseases
+    .map((disease) => diseaseMap[disease])
+    .filter((item): item is string => Boolean(item));
 };
 
 const DISEASE_OPTIONS = [
@@ -323,7 +323,6 @@ export default function DiseaseCheckScreen() {
           gender: getGenderValue(finalProfile.gender),
           current_weight: Number(finalProfile.weight) || 0,
           bcs_score: getBcsScore(finalProfile.bcs),
-          diseases: finalProfile.diseases || [],
           health_status: getHealthStatusValue(finalProfile.diseases),
         };
 

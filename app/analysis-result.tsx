@@ -297,7 +297,7 @@ export default function AnalysisResultScreen() {
               petDetail?.health_status ||
               selectedPet.diseases ||
               selectedPet.health_status ||
-              "none"
+              "none",
           ) || localProfile?.diseases,
       };
       console.log("서버에서 프로필 가져옴:", profile);
@@ -399,70 +399,6 @@ export default function AnalysisResultScreen() {
           console.log("챗봇용 사료 분석 저장 실패:", err);
         }
 
-        // 1. 사료 정보 등록 먼저
-        let foodId = null;
-        try {
-          const foodResponse = await fetch(`${GO_SERVER_URL}/api/v1/foods`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "ngrok-skip-browser-warning": "true",
-            },
-            body: JSON.stringify({
-              fat_pct: result.food_info.fat_pct,
-              kcal_per_g: result.food_info.calories_per_100g
-                ? result.food_info.calories_per_100g / 100
-                : null,
-              product_name: result.food_info.product_name,
-              protein_pct: result.food_info.protein_pct,
-            }),
-          });
-          const foodResult = await foodResponse.json();
-          foodId = foodResult.food_id;
-          console.log("사료 등록 완료, food_id:", foodId);
-
-          // 2. 사료 사진 업로드
-          if (foodId && imageUri) {
-            const photoFormData = new FormData();
-            photoFormData.append("food_id", String(foodId));
-            photoFormData.append("photo", {
-              uri: imageUri,
-              type: "image/jpeg",
-              name: "food_photo.jpg",
-            } as any);
-
-            await fetch(`${GO_SERVER_URL}/api/v1/foods/photo`, {
-              method: "POST",
-              headers: {
-                "ngrok-skip-browser-warning": "true",
-              },
-              body: photoFormData,
-            });
-            console.log("사료 사진 업로드 완료");
-          }
-        } catch (err) {
-          console.log("사료 등록/사진 업로드 실패:", err);
-        }
-
-        // 3. Go 서버에 분석 결과 저장 (food_id 포함)
-        try {
-          await fetch(`${GO_SERVER_URL}/api/v1/pets/${serverPetId}/analysis`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              "ngrok-skip-browser-warning": "true",
-            },
-            body: JSON.stringify({
-              bcs: bcsToNumber(profile.bcs || ""),
-              food_id: foodId,
-              recommended_amount: result.feeding_recommendation.grams_per_meal,
-            }),
-          });
-          console.log("Go 서버 저장 완료");
-        } catch (err) {
-          console.log("Go 서버 저장 실패:", err);
-        }
-
         return;
       }
 
@@ -520,8 +456,73 @@ export default function AnalysisResultScreen() {
 
       const oneMealAmount = feeding.grams_per_meal ?? feeding.daily_grams;
 
+      let foodId: number | null = null;
+
+      try {
+        const foodResponse = await fetch(`${GO_SERVER_URL}/api/v1/foods`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",
+          },
+          body: JSON.stringify({
+            fat_pct: foodInfo.fat_pct,
+            kcal_per_g: foodInfo.calories_per_100g
+              ? foodInfo.calories_per_100g / 100
+              : null,
+            product_name: foodName,
+            protein_pct: foodInfo.protein_pct,
+          }),
+        });
+
+        const foodResult = await foodResponse.json();
+        foodId = foodResult.food_id;
+        console.log("사료 등록 완료, food_id:", foodId);
+
+        if (foodId && imageUri) {
+          const photoFormData = new FormData();
+          photoFormData.append("food_id", String(foodId));
+          photoFormData.append("photo", {
+            uri: imageUri,
+            type: "image/jpeg",
+            name: "food_photo.jpg",
+          } as any);
+
+          await fetch(`${GO_SERVER_URL}/api/v1/foods/photo`, {
+            method: "POST",
+            headers: {
+              "ngrok-skip-browser-warning": "true",
+            },
+            body: photoFormData,
+          });
+
+          console.log("사료 사진 업로드 완료");
+        }
+
+        if (foodId) {
+          await fetch(`${GO_SERVER_URL}/api/v1/pets/${savedPetId}/analysis`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "ngrok-skip-browser-warning": "true",
+            },
+            body: JSON.stringify({
+              food_id: foodId,
+              recommended_amount: oneMealAmount,
+            }),
+          });
+
+          console.log("대표 사료 변경 완료");
+        }
+      } catch (err) {
+        console.log("사료 등록 또는 대표 사료 변경 실패:", err);
+        ToastAndroid.show("사료 저장에 실패했어요.", ToastAndroid.SHORT);
+        return;
+      }
+
       const newFood = {
         id: `${Date.now()}`,
+        foodId,
         name: foodName,
         subLabel: foodInfo.brand || "AI 분석 사료",
         gramLabel: `${oneMealAmount}g 권장`,
