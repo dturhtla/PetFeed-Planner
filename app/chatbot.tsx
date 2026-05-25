@@ -3,8 +3,8 @@ import type { ChatReplyLocale } from "../utils/chatLocale";
 import {
   fixGluedNumberedListStarts,
   inferUserMessageLocale,
-  visionAnalysisLanguageSuffix,
-  visionAnalysisUserPrompt,
+  messageReferencesRecentPhoto,
+  userPhotoHistoryPlaceholder,
   wrapUserMessageForModelLanguage,
 } from "../utils/chatLocale";
 import {
@@ -92,18 +92,19 @@ BRAND_JSON:{"brandName":"Brand","productName":"Product line","species":"dog","es
 Registered pet data:
 - Below you may receive REGISTERED PET DATA and Last feed analysis from the user's app (server + local storage).
 - When the user asks about their pet's name, diseases, weight, age, BCS, or recent 사료 분석, answer using that data only.
-- Do not invent pets, diagnoses, or analysis results not listed there.`;
+- Do not invent pets, diagnoses, or analysis results not listed there.
+
+Pet photos in this chat:
+- When the user sends a photo (with or without text), you can see the image. Describe the pet (species, breed guess, age guess, visible traits) and answer their question.
+- If they send only a photo with no text, give a helpful visual summary and invite follow-up questions.
+- Later messages may refer to "my photo" or "this cat" — use your earlier analysis and any image re-sent with their message.
+- Never say you cannot view images when a photo is attached or was already discussed in this thread.`;
 
 /**
  * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
  * we fall back to other models instead of only using flash-lite.
  */
 const TEXT_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-] as const;
-const VISION_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
@@ -126,21 +127,6 @@ function isRetryableGeminiError(err: unknown): boolean {
   );
 }
 
-const PET_PHOTO_ANALYSIS_INSTRUCTION = `You analyze pet photos for a Pet Health Assistant app. Reply in plain text only (no markdown, no **). Be concise.
-
-When the image shows a pet (or you can tell it is meant to be an animal):
-- Species: dog, cat, rabbit, bird, reptile, other, or unclear.
-- Breed or type: best guess, or "mix", or "unclear" if not enough detail.
-- Age: puppy/kitten, young, adult, senior — or an approximate range; say it is only a visual guess.
-- Brief visible traits: coat, size, colors, anything notable.
-- End with one short line that photo and AI guesses are not medical facts; a vet can give an accurate exam.
-
-When the image does NOT show a pet (food, objects, people only, scenery, etc.):
-- First, briefly and kindly describe what is actually in the picture (what you see — e.g. strawberries in a container, a car, a plant).
-- Then clearly remind the user: this app is a Pet Health Assistant — it is meant for pet health, feeding, and behavior questions.
-- Invite them to share a photo of their pet or type a question about their dog, cat, rabbit, or similar pet.
-- Do not give a full pet breed/age analysis for a non-pet image.`;
-
 type MessageRole = "user" | "assistant" | "error";
 
 type ChatMessage = {
@@ -150,6 +136,12 @@ type ChatMessage = {
   imageUri?: string;
   /** Locale of the user message that triggered this reply (for card labels) */
   replyLocale?: ChatReplyLocale;
+};
+
+type LastPetPhotoContext = {
+  base64: string;
+  mimeType: string;
+  analysis: string;
 };
 
 function guessMimeType(uri: string) {
@@ -198,6 +190,14 @@ export default function ChatbotScreen() {
   const lastReplyLocaleRef = useRef<ChatReplyLocale>("ko");
   /** Pet profile + last 사료 분석 snapshot for system instruction. */
   const petContextRef = useRef("");
+  /** Last pet photo + vision analysis for follow-up text questions. */
+  const lastPetPhotoRef = useRef<LastPetPhotoContext | null>(null);
+  /** Photo picked but not sent yet — attach on next text send. */
+  const [pendingPetPhoto, setPendingPetPhoto] = useState<{
+    uri: string;
+    base64: string;
+    mimeType: string;
+  } | null>(null);
 
   const apiKey = getGeminiApiKey();
 
@@ -303,17 +303,24 @@ export default function ChatbotScreen() {
       const history = messages
         .filter((m) => m.role !== "error")
         .map((m) => {
-          const textForModel =
-            m.content != null && m.content !== ""
-              ? m.content
-              : m.imageUri && m.role === "user"
-                ? " "
-                : "";
+          let textForModel = "";
+          if (m.imageUri && m.role === "user") {
+            const placeholder = userPhotoHistoryPlaceholder(
+              lastReplyLocaleRef.current,
+            );
+            textForModel =
+              m.content != null && m.content !== ""
+                ? `${m.content}\n${placeholder}`
+                : placeholder;
+          } else if (m.content != null && m.content !== "") {
+            textForModel = m.content;
+          }
           return {
             role: m.role === "user" ? ("user" as const) : ("model" as const),
             parts: [{ text: textForModel }],
           };
-        });
+        })
+        .filter((h) => h.parts[0].text !== "");
 
       chatSessionRef.current = modelRef.current.startChat({
         history: history.length > 0 ? history : undefined,
@@ -321,65 +328,6 @@ export default function ChatbotScreen() {
     }
 
     return chatSessionRef.current!;
-  };
-
-  const analyzePetPhotoWithGemini = async (
-    base64: string,
-    mimeType: string,
-    replyLocale: ChatReplyLocale,
-  ) => {
-    if (!apiKey || apiKey === "your_gemini_api_key_here") {
-      throw new Error(
-        "Gemini API key missing. Add EXPO_PUBLIC_GEMINI_API_KEY to your .env file.",
-      );
-    }
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const visionInstruction =
-      PET_PHOTO_ANALYSIS_INSTRUCTION +
-      visionAnalysisLanguageSuffix(replyLocale);
-    const parts = [
-      {
-        inlineData: {
-          mimeType,
-          data: base64,
-        },
-      },
-      {
-        text: visionAnalysisUserPrompt(replyLocale),
-      },
-    ];
-
-    const tryGenerate = async (modelName: string) => {
-      const m = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: visionInstruction,
-        generationConfig: { maxOutputTokens: 600 },
-      });
-      const result = await m.generateContent(parts);
-      return result.response.text();
-    };
-
-    let lastErr: unknown;
-    for (const modelName of VISION_MODELS) {
-      try {
-        return await tryGenerate(modelName);
-      } catch (err: unknown) {
-        lastErr = err;
-        const e = err as { status?: number; message?: string };
-        const msg = e?.message || "";
-        const isQuota = isRetryableGeminiError(err);
-        const isLiteVisionUnsupported =
-          msg.includes("400") &&
-          (msg.toLowerCase().includes("multimodal") ||
-            msg.toLowerCase().includes("image") ||
-            msg.toLowerCase().includes("not supported"));
-        if (isQuota || isLiteVisionUnsupported) {
-          continue;
-        }
-        throw err;
-      }
-    }
-    throw lastErr ?? new Error("Vision model requests failed.");
   };
 
   const imagePickerOptions: ImagePicker.ImagePickerOptions = {
@@ -390,57 +338,16 @@ export default function ChatbotScreen() {
     aspect: [4, 3],
   };
 
-  const runAnalyzeOnPickedImage = async (
+  const stagePetPhotoForSend = async (
     uri: string,
     mimeType: string,
     base64FromPicker: string | null | undefined,
   ) => {
-    if (!historyReady) return;
     let b64 = base64FromPicker;
     if (!b64) {
       b64 = await imageToBase64(uri, null);
     }
-
-    const userMsgId = nextId();
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: userMsgId,
-        role: "user",
-        imageUri: uri,
-      },
-    ]);
-    setIsLoading(true);
-
-    try {
-      const analysis = await analyzePetPhotoWithGemini(
-        b64,
-        mimeType,
-        lastReplyLocaleRef.current,
-      );
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: nextId(),
-          role: "assistant",
-          content: analysis,
-          replyLocale: lastReplyLocaleRef.current,
-        },
-      ]);
-      void persistChatTurn("(사진) 반려동물 사진 분석", analysis);
-    } catch (err: unknown) {
-      console.error("Pet photo analysis error:", err);
-      const e = err as { message?: string };
-      const msg =
-        e?.message ||
-        "Could not analyze the photo. Check your API key, free-tier limits, and network.";
-      setMessages((prev) => [
-        ...prev,
-        { id: nextId(), role: "error", content: msg },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
+    setPendingPetPhoto({ uri, base64: b64, mimeType });
   };
 
   const pickFromCamera = async () => {
@@ -456,7 +363,7 @@ export default function ChatbotScreen() {
       const picked = await ImagePicker.launchCameraAsync(imagePickerOptions);
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
-      await runAnalyzeOnPickedImage(
+      await stagePetPhotoForSend(
         asset.uri,
         asset.mimeType || guessMimeType(asset.uri),
         asset.base64,
@@ -482,7 +389,7 @@ export default function ChatbotScreen() {
         await ImagePicker.launchImageLibraryAsync(imagePickerOptions);
       if (picked.canceled || !picked.assets?.[0]) return;
       const asset = picked.assets[0];
-      await runAnalyzeOnPickedImage(
+      await stagePetPhotoForSend(
         asset.uri,
         asset.mimeType || guessMimeType(asset.uri),
         asset.base64,
@@ -502,7 +409,7 @@ export default function ChatbotScreen() {
       });
       if (result.canceled || !result.assets?.[0]) return;
       const file = result.assets[0];
-      await runAnalyzeOnPickedImage(
+      await stagePetPhotoForSend(
         file.uri,
         file.mimeType || guessMimeType(file.name || file.uri),
         file.base64 ?? null,
@@ -514,20 +421,20 @@ export default function ChatbotScreen() {
     }
   };
 
-  const openPetImagePicker = () => {
+  const attachPetPhoto = () => {
     if (isLoading || !historyReady) return;
 
     if (Platform.OS === "web") {
-      Alert.alert("Add pet photo", "Choose how to add an image.", [
-        { text: "Cancel", style: "cancel" },
+      Alert.alert("사진 추가", undefined, [
+        { text: "취소", style: "cancel" },
         {
-          text: "Photo library",
+          text: "사진 앨범",
           onPress: () => {
             void pickFromPhotoLibrary();
           },
         },
         {
-          text: "Browse files",
+          text: "파일",
           onPress: () => {
             void pickFromDeviceFiles();
           },
@@ -536,24 +443,18 @@ export default function ChatbotScreen() {
       return;
     }
 
-    Alert.alert("Add pet photo", "Choose how to add an image.", [
-      { text: "Cancel", style: "cancel" },
+    Alert.alert("사진 추가", undefined, [
+      { text: "취소", style: "cancel" },
       {
-        text: "Camera",
-        onPress: () => {
-          void pickFromCamera();
-        },
-      },
-      {
-        text: "Photo library",
+        text: "사진 앨범",
         onPress: () => {
           void pickFromPhotoLibrary();
         },
       },
       {
-        text: "Browse files",
+        text: "카메라",
         onPress: () => {
-          void pickFromDeviceFiles();
+          void pickFromCamera();
         },
       },
     ]);
@@ -645,24 +546,82 @@ export default function ChatbotScreen() {
 
   const sendMessage = async () => {
     const text = input.trim();
-    if (!text || isLoading || !historyReady) return;
+    const photoToSend = pendingPetPhoto;
+    if ((!text && !photoToSend) || isLoading || !historyReady) return;
 
-    const replyLocale = inferUserMessageLocale(text);
+    const displayText =
+      text ||
+      (lastReplyLocaleRef.current === "en"
+        ? "(Pet photo with question)"
+        : "(사진과 함께 질문)");
+    const replyLocale = inferUserMessageLocale(text || displayText);
     lastReplyLocaleRef.current = replyLocale;
 
     setInput("");
-    setMessages((prev) => [
-      ...prev,
-      { id: nextId(), role: "user", content: text },
-    ]);
+    setPendingPetPhoto(null);
+
+    const userMsg: ChatMessage = photoToSend
+      ? {
+          id: nextId(),
+          role: "user",
+          content: text || undefined,
+          imageUri: photoToSend.uri,
+        }
+      : { id: nextId(), role: "user", content: displayText };
+
+    setMessages((prev) => [...prev, userMsg]);
     setIsLoading(true);
 
     try {
       await refreshPetContext();
 
+      const photoCtx = lastPetPhotoRef.current;
+      const attachRecentPhoto =
+        !photoToSend &&
+        photoCtx != null &&
+        messageReferencesRecentPhoto(displayText);
+
       const attemptSend = async () => {
         const chat = getOrCreateChatSession();
-        const textForModel = wrapUserMessageForModelLanguage(text, replyLocale);
+        const defaultPhotoQuestion =
+          replyLocale === "en"
+            ? "Look at this pet photo. Describe the animal and answer any pet health or care questions."
+            : "이 반려동물 사진을 보고 종류·품종·나이 등을 알려 주고, 건강·관리 조언을 해 주세요.";
+        const textForModel = wrapUserMessageForModelLanguage(
+          text || defaultPhotoQuestion,
+          replyLocale,
+        );
+
+        if (photoToSend) {
+          const result = await chat.sendMessage([
+            {
+              inlineData: {
+                mimeType: photoToSend.mimeType,
+                data: photoToSend.base64,
+              },
+            },
+            { text: textForModel },
+          ]);
+          return result.response.text();
+        }
+
+        if (attachRecentPhoto && photoCtx) {
+          const withContext =
+            `${textForModel}\n\n` +
+            `[The user is asking about their pet photo from earlier in this chat. ` +
+            `Your prior visual analysis: ${photoCtx.analysis}]`;
+          const result = await chat.sendMessage([
+            {
+              inlineData: {
+                mimeType: photoCtx.mimeType,
+                data: photoCtx.base64,
+              },
+            },
+            { text: withContext },
+          ]);
+          return result.response.text();
+        }
+
         const result = await chat.sendMessage(textForModel);
         return result.response.text();
       };
@@ -702,7 +661,16 @@ export default function ChatbotScreen() {
           replyLocale,
         },
       ]);
-      void persistChatTurn(text, aiText);
+      if (photoToSend) {
+        lastPetPhotoRef.current = {
+          base64: photoToSend.base64,
+          mimeType: photoToSend.mimeType,
+          analysis: aiText,
+        };
+        modelRef.current = null;
+        chatSessionRef.current = null;
+      }
+      void persistChatTurn(displayText, aiText);
     } catch (err: unknown) {
       console.error("Gemini API error:", err);
       const e = err as {
@@ -742,10 +710,17 @@ export default function ChatbotScreen() {
         <View style={[styles.messageRow, styles.messageRowUser]}>
           <View style={[styles.messageBubble, styles.messageBubbleUser]}>
             {item.imageUri ? (
-              <Image
-                source={{ uri: item.imageUri }}
-                style={styles.userPhotoThumb}
-              />
+              <>
+                <Image
+                  source={{ uri: item.imageUri }}
+                  style={styles.userPhotoThumb}
+                />
+                {item.content ? (
+                  <Text style={[styles.messageText, styles.messageTextUser]}>
+                    {item.content}
+                  </Text>
+                ) : null}
+              </>
             ) : (
               <Text style={[styles.messageText, styles.messageTextUser]}>
                 {item.content}
@@ -872,11 +847,28 @@ export default function ChatbotScreen() {
             }
           />
 
+          {pendingPetPhoto ? (
+            <View style={styles.pendingPhotoRow}>
+              <Image
+                source={{ uri: pendingPetPhoto.uri }}
+                style={styles.pendingPhotoThumb}
+              />
+              <TouchableOpacity
+                onPress={() => setPendingPetPhoto(null)}
+                accessibilityLabel="Remove attached photo"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={styles.pendingPhotoRemove}
+              >
+                <Ionicons name="close-circle" size={24} color="#5a7a6e" />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
           <View style={styles.inputRow}>
             <TouchableOpacity
-              onPress={openPetImagePicker}
+              onPress={attachPetPhoto}
               disabled={isLoading || !historyReady}
-              accessibilityLabel="Add pet photo: camera, photo library, or files"
+              accessibilityLabel="Add pet photo"
               style={[
                 styles.attachButton,
                 (!historyReady || isLoading) && styles.sendButtonDisabled,
@@ -916,10 +908,16 @@ export default function ChatbotScreen() {
             />
             <TouchableOpacity
               onPress={sendMessage}
-              disabled={isLoading || !input.trim() || !historyReady}
+              disabled={
+                isLoading ||
+                (!input.trim() && !pendingPetPhoto) ||
+                !historyReady
+              }
               style={[
                 styles.sendButton,
-                (isLoading || !input.trim() || !historyReady) &&
+                (isLoading ||
+                  (!input.trim() && !pendingPetPhoto) ||
+                  !historyReady) &&
                   styles.sendButtonDisabled,
               ]}
             >
@@ -1091,6 +1089,26 @@ const styles = StyleSheet.create({
   typingDot: {
     color: "#2F6B57",
     letterSpacing: 1,
+  },
+  pendingPhotoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+    gap: 8,
+    backgroundColor: "#ffffff",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(47, 107, 87, 0.15)",
+  },
+  pendingPhotoThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: "rgba(47, 107, 87, 0.1)",
+  },
+  pendingPhotoRemove: {
+    marginLeft: "auto",
   },
   inputRow: {
     flexDirection: "row",

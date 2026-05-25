@@ -59,6 +59,41 @@ export function visionAnalysisUserPrompt(
   return "Analyze this image. Follow the system instructions and reply in English only.";
 }
 
+/** Placeholder in Gemini chat history when the UI showed an image-only user bubble. */
+export function userPhotoHistoryPlaceholder(
+  replyLocale: ChatReplyLocale,
+): string {
+  if (replyLocale === "en") {
+    return (
+      "[User shared a pet photo in the chat. Your very next reply in this thread was your " +
+      "visual analysis of that image — use that analysis when they ask follow-up questions about the photo.]"
+    );
+  }
+  return (
+    "[사용자가 반려동물 사진을 채팅에 공유했습니다. 바로 다음 답변이 그 사진에 대한 시각 분석입니다. " +
+    "사진에 대한 후속 질문에는 그 분석 내용을 활용하세요.]"
+  );
+}
+
+/** True when the user is likely referring to a photo they already shared in this chat. */
+export function messageReferencesRecentPhoto(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+  const en =
+    /\b(this|my|the|that)\s+(photo|picture|image|pic)\b/.test(lower) ||
+    /\b(photo|picture|image)\b.*\b(cat|dog|pet|rabbit|animal)\b/.test(lower) ||
+    /\b(cat|dog|pet)\b.*\b(photo|picture|image)\b/.test(lower) ||
+    /\bwhat\b.*\b(breed|species|age)\b/.test(lower) ||
+    /\b(in|from)\s+(this|the)\s+(photo|picture|image)\b/.test(lower);
+  const ko =
+    /사진/.test(t) ||
+    /이\s*사진/.test(t) ||
+    /내\s*(고양이|강아지|반려|펫|토끼)/.test(t) ||
+    /품종|종류|나이/.test(t);
+  return en || ko;
+}
+
 /**
  * Puts "1. …" on the next line when it was on the same line as the intro (single newline, no extra blank line).
  */
