@@ -76,6 +76,54 @@ def calculate_daily_kcal(species: str, weight_kg: float, life_stage: str) -> flo
     return rer * factor
 
 
+def check_nutrition_standards(
+    species: str,
+    life_stage: str,
+    protein_pct: float | None,
+    fat_pct: float | None,
+    calories_per_100g: float | None,
+) -> list:
+    issues = []
+
+    standards = {
+        "dog": {
+            "protein_max": 30.0,
+            "fat_max": 16.0,
+            "kcal_max": 390.0,
+        },
+        "cat": {
+            "protein_min": 28.0,
+            "fat_max": 15.0,
+            "kcal_max": 400.0,
+        },
+    }
+
+    std = standards.get(species, standards["dog"])
+    is_obese = "obese" in life_stage or "비만" in life_stage
+
+    if species == "dog":
+        if protein_pct is not None and protein_pct >= std["protein_max"]:
+            issues.append(f"⚠️ 단백질 과다: {protein_pct}% (기준 {std['protein_max']}% 미만)")
+
+        # 비만일 때만 지방, 칼로리 체크
+        if is_obese:
+            if fat_pct is not None and fat_pct >= std["fat_max"]:
+                issues.append(f"⚠️ 지방 과다: {fat_pct}% (기준 {std['fat_max']}% 미만)")
+            if calories_per_100g is not None and calories_per_100g > std["kcal_max"]:
+                issues.append(f"⚠️ 고칼로리: {calories_per_100g}kcal/100g (기준 {std['kcal_max']}kcal 이하)")
+
+    if species == "cat":
+        if protein_pct is not None and protein_pct < std["protein_min"]:
+            issues.append(f"⚠️ 단백질 부족: {protein_pct}% (권장 {std['protein_min']}% 이상)")
+
+        if is_obese:
+            if fat_pct is not None and fat_pct >= std["fat_max"]:
+                issues.append(f"⚠️ 지방 과다: {fat_pct}% (기준 {std['fat_max']}% 미만)")
+            if calories_per_100g is not None and calories_per_100g > std["kcal_max"]:
+                issues.append(f"⚠️ 고칼로리: {calories_per_100g}kcal/100g (기준 {std['kcal_max']}kcal 이하)")
+
+    return issues
+
 def check_ingredient_warnings(
     species: str,
     health_conditions: list,
@@ -85,15 +133,20 @@ def check_ingredient_warnings(
     warnings = []
 
     species_dangerous = {
-        "dog": ["자일리톨", "포도", "양파", "마늘", "초콜릿", "카페인"],
-        "cat": ["양파", "마늘", "초콜릿", "카페인", "참치통조림"],
+        "dog": ["자일리톨", "포도", "건포도", "양파", "마늘", "부추", "초콜릿", "카페인", "마카다미아", "아보카도", "알코올"],
+        "cat": ["양파", "마늘", "부추", "초콜릿", "카페인", "참치통조림", "생선뼈", "알코올", "포도", "건포도"],
     }
 
     condition_dangerous = {
-        "kidney_disease": ["인", "나트륨", "인산염"],
-        "diabetes":       ["옥수수", "설탕", "당밀", "과당"],
-        "obesity":        ["물엿", "당밀", "과당"],
-        "heart_disease":  ["나트륨", "소금"],
+        "kidney_disease":   ["인", "나트륨", "인산염", "칼륨", "마그네슘", "단백질"],
+        "heart_disease":    ["나트륨", "소금", "염화나트륨", "MSG", "간장"],
+        "diabetes":         ["옥수수", "설탕", "당밀", "과당", "포도당", "전분", "꿀"],
+        "obesity":          ["물엿", "당밀", "과당", "지방", "오일"],
+        "pancreatitis":     ["지방", "오일", "버터", "치즈"],
+        "arthritis":        ["오메가6", "해바라기유", "옥수수유"],
+        "hypothyroidism":   ["요오드", "해조류", "미역", "다시마"],
+        "hyperthyroidism":  ["요오드", "해조류", "미역", "다시마"],
+        "urinary_disease":  ["마그네슘", "인", "나트륨", "칼슘"],
     }
 
     dangerous = species_dangerous.get(species, [])
@@ -102,12 +155,65 @@ def check_ingredient_warnings(
             warnings.append(f"⚠️ {species} 금지 성분: '{ingredient}' 포함")
 
     for condition in health_conditions:
-        dangerous = condition_dangerous.get(condition, [])
+        cond_dangerous = condition_dangerous.get(condition, [])
         for ingredient in ingredients:
-            if any(d.lower() in ingredient.lower() for d in dangerous):
+            if any(d.lower() in ingredient.lower() for d in cond_dangerous):
                 warnings.append(f"⚠️ {condition} 주의: '{ingredient}' 성분 포함")
 
     return warnings
+
+
+async def recommend_alternative_food(
+    species: str,
+    health_conditions: list,
+    current_food_brand: str,
+    current_food_name: str,
+    warnings: list,
+    nutrition_issues: list,
+) -> str | None:
+    """위험 성분 또는 영양 기준 미달 시 대체 사료 추천"""
+
+    all_issues = warnings + nutrition_issues
+
+    if not all_issues:
+        return None
+
+    species_korean = {
+        "dog": "강아지", "cat": "고양이"
+    }
+
+    condition_korean = {
+        "kidney_disease":   "신장질환",
+        "heart_disease":    "심장질환",
+        "diabetes":         "당뇨",
+        "obesity":          "비만",
+        "pancreatitis":     "췌장염",
+        "arthritis":        "관절염",
+        "hypothyroidism":   "갑상선기능저하증",
+        "hyperthyroidism":  "갑상선기능항진증",
+        "urinary_disease":  "비뇨기질환",
+    }
+
+    conditions_korean = [condition_korean.get(c, c) for c in health_conditions]
+
+    prompt = f"""반려동물 정보:
+- 종: {species_korean.get(species, species)}
+- 건강 상태: {', '.join(conditions_korean) if conditions_korean else "없음"}
+- 현재 사료: {current_food_brand} {current_food_name}
+- 문제점: {', '.join(all_issues)}
+
+위 반려동물의 건강 상태와 영양 문제를 고려했을 때 현재 사료 대신 추천할 수 있는 사료를 알려주세요.
+다음 형식으로 2~3개 추천해주세요:
+- 브랜드명 제품명: 추천 이유 한 줄
+
+마크다운 문법 없이 일반 텍스트로 작성해주세요."""
+
+    response = await generate_with_retry(
+        model="gemini-2.5-flash-lite",
+        contents=prompt
+    )
+
+    return response.text.strip()
 
 
 async def generate_recommendation_text(
@@ -152,9 +258,11 @@ async def generate_recommendation_text(
 - {official_info}
 {warning_info}
 
-위 정보를 바탕으로 보호자에게 친근한 말투로 2~3문장으로 작성해주세요.
-급여량과 횟수는 이미 별도로 표시되므로 언급하지 마세요.
-건강 상태에 따른 주의사항, 특이사항, 물 섭취 팁 위주로 작성해주세요."""
+위 정보를 바탕으로 보호자에게 친근한 말투로 반드시 2문장으로만 작성해주세요.
+급여량과 횟수는 절대 언급하지 마세요.
+비만이거나 과체중이면 반드시 체중 관리 주의사항을 포함해주세요.
+건강 상태(질병)가 있다면 반드시 해당 질병 주의사항을 포함해주세요.
+마크다운 문법(**굵게** 등)은 사용하지 마세요."""
 
     response = await generate_with_retry(
         model="gemini-2.5-flash-lite",
@@ -187,10 +295,10 @@ async def calculate_feeding(
 
     # 2. 공식 권장량 검색
     official_grams = None
-    # if food.brand and food.product_name:
-    #     official_grams = await search_official_feeding_guide(
-    #         food.brand, food.product_name, species, weight_kg, age_years
-    #     )
+    if food.brand and food.product_name:
+        official_grams = await search_official_feeding_guide(
+            food.brand, food.product_name, species, weight_kg, age_years
+        )
 
     # 3. 교차 검증 및 최종 급여량 결정
     warning_message = None
@@ -220,7 +328,28 @@ async def calculate_feeding(
         food.main_ingredients if food.main_ingredients else []
     )
 
-    # 6. 최종 급여량 확정 후 추천 코멘트 생성
+    # 6. 영양 기준 체크
+    nutrition_issues = check_nutrition_standards(
+        species,
+        life_stage,
+        food.protein_pct,
+        food.fat_pct,
+        food.calories_per_100g,
+    )
+
+    # 7. 위험 성분 또는 영양 기준 미달 시 대체 사료 추천
+    alternative_food = None
+    if warnings or nutrition_issues:
+        alternative_food = await recommend_alternative_food(
+            species,
+            health_conditions,
+            food.brand or "",
+            food.product_name or "",
+            warnings,
+            nutrition_issues,
+    )
+
+    # 8. 최종 급여량 확정 후 추천 코멘트 생성
     recommendation_text = await generate_recommendation_text(
         pet_name, species, weight_kg, age_years,
         life_stage, health_conditions, food,
@@ -236,5 +365,6 @@ async def calculate_feeding(
         "official_grams":      round(official_grams) if official_grams else None,
         "warning":             warning_message,
         "recommendation":      recommendation_text,
-        "ingredient_warnings": warnings
+        "ingredient_warnings": warnings + nutrition_issues,
+        "alternative_food":    alternative_food,
     }
