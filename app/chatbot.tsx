@@ -1,17 +1,4 @@
 import BrandRecommendationCard from "@/components/BrandRecommendationCard";
-import type { ChatReplyLocale } from "../utils/chatLocale";
-import {
-  fixGluedNumberedListStarts,
-  inferUserMessageLocale,
-  visionAnalysisLanguageSuffix,
-  visionAnalysisUserPrompt,
-  wrapUserMessageForModelLanguage,
-} from "../utils/chatLocale";
-import {
-  ExpoSpeechRecognitionModule,
-  isSpeechRecognitionAvailable,
-  useSpeechRecognitionEvent,
-} from "../utils/speechRecognitionSafe";
 import { parseBrandRecommendationsFromModelText } from "@/utils/brandRecommendation";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -42,7 +29,6 @@ import {
   SafeAreaView,
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
-import { buildChatPetContextBlock } from "../utils/chatPetContext";
 import {
   fetchChatHistoryFromServer,
   getChatApiOrigin,
@@ -50,6 +36,20 @@ import {
   resolveChatBackendUserId,
   saveChatTurnToServer,
 } from "../utils/chatHistoryApi";
+import type { ChatReplyLocale } from "../utils/chatLocale";
+import {
+  fixGluedNumberedListStarts,
+  inferUserMessageLocale,
+  visionAnalysisLanguageSuffix,
+  visionAnalysisUserPrompt,
+  wrapUserMessageForModelLanguage,
+} from "../utils/chatLocale";
+import { buildChatPetContextBlock } from "../utils/chatPetContext";
+import {
+  ExpoSpeechRecognitionModule,
+  isSpeechRecognitionAvailable,
+  useSpeechRecognitionEvent,
+} from "../utils/speechRecognitionSafe";
 
 let idCounter = 0;
 function nextId() {
@@ -589,10 +589,7 @@ export default function ChatbotScreen() {
       return;
     }
     if (code === "aborted" || code === "no-speech") return;
-    Alert.alert(
-      "음성 입력",
-      e.message || code || "음성 인식에 실패했습니다.",
-    );
+    Alert.alert("음성 입력", e.message || code || "음성 인식에 실패했습니다.");
   });
 
   const stopRecording = useCallback(() => {
@@ -713,7 +710,11 @@ export default function ChatbotScreen() {
       };
       let errorMessage = e?.message || "Unknown error";
       const msgLower = errorMessage.toLowerCase();
-      if (e?.status === 503 || msgLower.includes("503") || msgLower.includes("high demand")) {
+      if (
+        e?.status === 503 ||
+        msgLower.includes("503") ||
+        msgLower.includes("high demand")
+      ) {
         errorMessage =
           "Gemini 서버가 일시적으로 바쁩니다 (503). 잠시 후 다시 시도해 주세요. 자동으로 다른 모델로 재시도했지만 모두 실패한 경우입니다.";
       } else if (isRetryableGeminiError(err)) {
@@ -807,7 +808,10 @@ export default function ChatbotScreen() {
   const keyExtractor = useCallback((item: ChatMessage) => item.id, []);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "left", "right"]}>
+    <SafeAreaView
+      style={styles.safe}
+      edges={["top", "left", "right", "bottom"]}
+    >
       <KeyboardAvoidingView
         style={styles.keyboardRoot}
         behavior={
@@ -941,7 +945,7 @@ const styles = StyleSheet.create({
   card: {
     flex: 1,
     marginHorizontal: 12,
-    marginBottom: 8,
+    marginBottom: -4,
     borderRadius: 20,
     overflow: "hidden",
     backgroundColor: "#fdfdfa",
@@ -1096,7 +1100,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === "android" ? 4 : 8,
     borderTopWidth: 1,
     borderTopColor: "rgba(47, 107, 87, 0.15)",
     backgroundColor: "#ffffff",

@@ -37,6 +37,7 @@ type PetProfileItem = {
 
 type FeedingRecord = {
   id: string;
+  logId?: number;
   petId: string;
   date: string;
   foodName: string;
@@ -46,6 +47,7 @@ type FeedingRecord = {
   time: string;
   sortKey?: number;
   source?: "alarm" | "manual" | "iot";
+  canDelete?: boolean;
   alarmId?: string;
   serverFeedTime?: string;
 };
@@ -241,13 +243,41 @@ function mergeFeedingRecords(
     );
 
     if (duplicateIndex >= 0) {
-      merged[duplicateIndex] = iotRecord;
+      merged[duplicateIndex] = {
+        ...iotRecord,
+        source: "iot",
+        canDelete: false,
+      };
     } else {
       merged.push(iotRecord);
     }
   }
 
   return merged;
+}
+
+function dedupeRecordsByLogId(records: FeedingRecord[]) {
+  const result: FeedingRecord[] = [];
+  const logIdIndexMap = new Map<number, number>();
+
+  for (const record of records) {
+    if (record.logId) {
+      const existingIndex = logIdIndexMap.get(record.logId);
+
+      if (existingIndex !== undefined) {
+        result[existingIndex] = record;
+      } else {
+        logIdIndexMap.set(record.logId, result.length);
+        result.push(record);
+      }
+
+      continue;
+    }
+
+    result.push(record);
+  }
+
+  return result;
 }
 
 const show = (msg: string) => {
@@ -387,24 +417,6 @@ export default function RecordsScreen() {
     return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
   };
 
-  const createDateFromRecord = (record: FeedingRecord) => {
-    const [year, month, day] = record.date.split(".").map(Number);
-    const [hour, minute] = normalizeRecordTime(record.time)
-      .split(":")
-      .map(Number);
-
-    const date = new Date();
-    date.setFullYear(year);
-    date.setMonth((month || 1) - 1);
-    date.setDate(day || 1);
-    date.setHours(hour || 0);
-    date.setMinutes(minute || 0);
-    date.setSeconds(0);
-    date.setMilliseconds(0);
-
-    return date;
-  };
-
   const resetAddForm = useCallback(() => {
     setSelectedFood(null);
     setTempSelectedFood(null);
@@ -529,8 +541,12 @@ export default function RecordsScreen() {
 
         const feedAmount = rawFeedAmount > 0 ? rawFeedAmount : consumedAmount;
 
+        const isManual =
+          session.feed_type === "MANUAL" || session.feed_type === "manual";
+
         return {
-          id: `iot-${petId}-${feedingTime}-${index}`,
+          id: String(session.log_id ?? `${petId}-${feedingTime}-${index}`),
+          logId: session.log_id ? Number(session.log_id) : undefined,
           petId,
           date: displayDate,
           foodName: session.food_name || `사료 ID ${session.current_food_id}`,
@@ -539,7 +555,8 @@ export default function RecordsScreen() {
           eatenAmount: `${consumedAmount}g`,
           time: displayTime,
           sortKey: feedingTime ? new Date(feedingTime).getTime() : Date.now(),
-          source: "iot" as const,
+          source: isManual ? "manual" : "iot",
+          canDelete: isManual,
           serverFeedTime: feedingTime,
         };
       });
@@ -809,11 +826,32 @@ export default function RecordsScreen() {
         ? JSON.parse(savedRecords)
         : [];
 
-      const iotRecords = await loadIoTRecords(petIdForFoods, email);
+      const sessionRecords = await loadIoTRecords(petIdForFoods, email);
 
-      const mergedRecords = mergeFeedingRecords(manualRecords, iotRecords);
+      const serverManualRecords = sessionRecords.filter(
+        (record) => record.source === "manual",
+      );
 
-      setRecords(mergedRecords);
+      const iotRecords = sessionRecords.filter(
+        (record) => record.source === "iot",
+      );
+
+      const localOnlyManualRecords = manualRecords.filter(
+        (localRecord) =>
+          !localRecord.logId ||
+          !serverManualRecords.some(
+            (serverRecord) => serverRecord.logId === localRecord.logId,
+          ),
+      );
+
+      const mergedRecords = mergeFeedingRecords(
+        [...serverManualRecords, ...localOnlyManualRecords],
+        iotRecords,
+      );
+
+      const dedupedRecords = dedupeRecordsByLogId(mergedRecords);
+
+      setRecords(dedupedRecords);
 
       const savedFoods = await AsyncStorage.getItem(
         storageKeys.savedFoods(email, petIdForFoods),
@@ -923,19 +961,55 @@ export default function RecordsScreen() {
     return hour * 60 + minute;
   };
 
+  const isAmountWithinAlarmRange = (
+    record: FeedingRecord,
+    alarm: AlarmItem,
+  ) => {
+    const recordAmount = getGramNumber(record.amount);
+    const alarmAmount = Number(alarm.amount);
+
+    if (!alarmAmount || !recordAmount) return false;
+
+    const tolerance = alarmAmount * 0.1;
+
+    return Math.abs(recordAmount - alarmAmount) <= tolerance;
+  };
+
+  const isRecordMatchedToAlarm = useCallback(
+    (record: FeedingRecord, alarm: AlarmItem) => {
+      const alarmMinutes = getAlarmSortValue(alarm);
+      const recordMinutes = getRecordSortMinutes(record);
+
+      return (
+        record.petId === selectedPetId &&
+        record.date === formatDate() &&
+        Math.abs(recordMinutes - alarmMinutes) <= 30 &&
+        isAmountWithinAlarmRange(record, alarm)
+      );
+    },
+    [selectedPetId],
+  );
+
   const combinedTimelineItems = useMemo(() => {
     const usedRecordIds = new Set<string>();
 
     const alarmItems = todayFeedingSchedules.map((alarm) => {
       const alarmMinutes = getAlarmSortValue(alarm);
 
-      const matchedRecord = todayRecordCards.find((record) => {
-        if (usedRecordIds.has(record.id)) return false;
+      const matchedCandidates = todayRecordCards
+        .filter((record) => !usedRecordIds.has(record.id))
+        .filter((record) => isRecordMatchedToAlarm(record, alarm))
+        .sort((a, b) => {
+          if (a.source === "iot" && b.source !== "iot") return -1;
+          if (a.source !== "iot" && b.source === "iot") return 1;
 
-        const recordMinutes = getRecordSortMinutes(record);
+          return (
+            Math.abs(getRecordSortMinutes(a) - alarmMinutes) -
+            Math.abs(getRecordSortMinutes(b) - alarmMinutes)
+          );
+        });
 
-        return Math.abs(recordMinutes - alarmMinutes) <= 30;
-      });
+      const matchedRecord = matchedCandidates[0];
 
       if (matchedRecord) {
         usedRecordIds.add(matchedRecord.id);
@@ -962,7 +1036,7 @@ export default function RecordsScreen() {
     return [...alarmItems, ...recordItems].sort(
       (a, b) => a.sortMinutes - b.sortMinutes,
     );
-  }, [todayFeedingSchedules, todayRecordCards]);
+  }, [todayFeedingSchedules, todayRecordCards, isRecordMatchedToAlarm]);
 
   const selectedPet = useMemo(() => {
     return petProfiles.find((pet) => pet.id === selectedPetId);
@@ -970,14 +1044,11 @@ export default function RecordsScreen() {
 
   const isFedFromAlarm = useCallback(
     (alarm: AlarmItem) => {
-      const alarmMinutes = getAlarmSortValue(alarm);
-
-      return todayRecordCards.some((record) => {
-        const recordMinutes = getRecordSortMinutes(record);
-        return Math.abs(recordMinutes - alarmMinutes) <= 30;
-      });
+      return todayRecordCards.some((record) =>
+        isRecordMatchedToAlarm(record, alarm),
+      );
     },
-    [todayRecordCards],
+    [todayRecordCards, isRecordMatchedToAlarm],
   );
 
   const isMissedAlarm = useCallback(
@@ -1111,6 +1182,26 @@ export default function RecordsScreen() {
       return;
     }
 
+    // 이미 같은 알람 시간대 기록 있으면 저장 막기
+    if (isFromAlarm && selectedAlarmId) {
+      const alarm = todayFeedingSchedules.find((a) => a.id === selectedAlarmId);
+
+      if (alarm) {
+        const alreadyMatched = records.some((record) =>
+          isRecordMatchedToAlarm(record, alarm),
+        );
+
+        if (alreadyMatched) {
+          Alert.alert(
+            "이미 완료된 알람",
+            "이미 해당 알람에 연결된 급여 기록이 있습니다.",
+          );
+
+          return;
+        }
+      }
+    }
+
     setIsSavingRecord(true);
 
     try {
@@ -1132,20 +1223,26 @@ export default function RecordsScreen() {
         return;
       }
 
-      await requestJson(`${API_BASE_URL}/api/v1/iot/self-manual-weight`, {
-        method: "POST",
-        body: JSON.stringify({
-          pet_id: Number(selectedPetId),
-          food_id: selectedFoodId,
-          feed_time: feedTime,
-          feed_amount: Number(amount),
-          consumption: Number(eatenAmount),
-        }),
-      });
+      const saveResult = await requestJson(
+        `${API_BASE_URL}/api/v1/iot/self-manual-weight`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            pet_id: Number(selectedPetId),
+            food_id: selectedFoodId,
+            feed_time: feedTime,
+            feed_amount: Number(amount),
+            consumption: Number(eatenAmount),
+          }),
+        },
+      );
 
       const now = Date.now();
+      const savedLogId = saveResult?.log_id
+        ? Number(saveResult.log_id)
+        : undefined;
       const newRecord: FeedingRecord = {
-        id: `${now}`,
+        id: String(savedLogId ?? now),
         petId: selectedPetId,
         date: formatDate(),
         foodId: selectedFoodId,
@@ -1157,15 +1254,35 @@ export default function RecordsScreen() {
         source: isFromAlarm ? "alarm" : "manual",
         alarmId: isFromAlarm ? (selectedAlarmId ?? undefined) : undefined,
         serverFeedTime: feedTime,
+        logId: savedLogId,
       };
 
-      const updatedRecords = [
+      const baseRecords = [
         ...records.filter(
           (record) =>
             !(newRecord.alarmId && record.alarmId === newRecord.alarmId),
         ),
         newRecord,
       ];
+
+      const manualRecords = baseRecords.filter(
+        (record) => record.source === "manual" || record.source === "alarm",
+      );
+
+      const iotRecords = baseRecords.filter(
+        (record) => record.source === "iot",
+      );
+
+      const updatedRecords = dedupeRecordsByLogId(
+        mergeFeedingRecords(manualRecords, iotRecords),
+      );
+
+      const wasMerged = updatedRecords.length < baseRecords.length;
+
+      if (wasMerged) {
+        show("중복된 IoT 기록과 수동 기록이 하나로 합쳐졌어요.");
+      }
+
       setRecords(updatedRecords);
 
       const localRecordsToSave = updatedRecords.filter(
@@ -1210,20 +1327,35 @@ export default function RecordsScreen() {
       );
 
       for (const record of recordsToDelete) {
-        const deleteBody = {
-          pet_id: Number(record.petId),
-          feed_time:
-            record.serverFeedTime ??
-            formatServerDateTime(createDateFromRecord(record)),
-          feed_amount: getGramNumber(record.amount),
-        };
+        if (record.source !== "manual" || record.canDelete === false) {
+          show("수동 기록만 삭제할 수 있어요.");
+          continue;
+        }
 
-        console.log("삭제 요청 body:", deleteBody);
+        if (!record.logId) {
+          show("삭제할 로그 ID가 없어 삭제할 수 없어요.");
+          continue;
+        }
 
-        await requestJson(`${API_BASE_URL}/api/v1/iot/weight-pair`, {
-          method: "DELETE",
-          body: JSON.stringify(deleteBody),
-        });
+        console.log("========== 삭제 요청 시작 ==========");
+        console.log("삭제 대상:", record);
+        console.log("삭제 logId:", record.logId);
+        console.log("DELETE URL:", `${API_BASE_URL}/api/v1/iot/weight-pair`);
+
+        const deleteResult = await requestJson(
+          `${API_BASE_URL}/api/v1/iot/weight-pair`,
+          {
+            method: "DELETE",
+            body: JSON.stringify({
+              pet_id: Number(record.petId),
+              feed_amount: getGramNumber(record.amount),
+              feed_time: `${record.date.replace(/\./g, "-")} ${record.time}:00`,
+            }),
+          },
+        );
+
+        console.log("삭제 응답:", deleteResult);
+        console.log("========== 삭제 완료 ==========");
       }
 
       const updatedRecords = records.filter(
@@ -1471,8 +1603,22 @@ export default function RecordsScreen() {
 
       const updatedFoods = [newItem, ...foodLibrary];
 
+      if (serverFoodId && API_BASE_URL) {
+        await requestJson(`${API_BASE_URL}/api/v1/pets/food`, {
+          method: "PUT",
+          body: JSON.stringify({
+            pet_id: Number(selectedPetId),
+            new_food_id: Number(serverFoodId),
+          }),
+        });
+
+        console.log("직접 입력 사료 대표사료 변경 완료:", serverFoodId);
+      }
+
       setFoodLibrary(updatedFoods);
       setTempSelectedFood(newItem);
+      setSelectedFood(newItem);
+      applyQuickAmountForFood(newItem);
 
       await AsyncStorage.setItem(
         storageKeys.savedFoods(userEmail, selectedPetId),
@@ -1549,6 +1695,19 @@ export default function RecordsScreen() {
     setAmount(String(alarm.amount));
     setEatenAmount(String(alarm.amount));
     setSelectedTime(createDateFromAlarm(alarm));
+
+    if (foundFood.foodId && API_BASE_URL) {
+      requestJson(`${API_BASE_URL}/api/v1/pets/food`, {
+        method: "PUT",
+        body: JSON.stringify({
+          pet_id: Number(selectedPetId),
+          new_food_id: Number(foundFood.foodId),
+        }),
+      }).catch((error) => {
+        console.log("알람 기록 대표사료 변경 실패:", error);
+      });
+    }
+
     setIsAddModalVisible(true);
   };
 
@@ -1587,6 +1746,22 @@ export default function RecordsScreen() {
       } else {
         setFoodLibrary([]);
       }
+
+      // IoT 기록 다시 로드
+      const savedRecords = await AsyncStorage.getItem(
+        storageKeys.feedingRecords(userEmail),
+      );
+
+      const manualRecords: FeedingRecord[] = savedRecords
+        ? JSON.parse(savedRecords)
+        : [];
+
+      const iotRecords = await loadIoTRecords(pet.id, userEmail);
+
+      const mergedRecords = mergeFeedingRecords(manualRecords, iotRecords);
+      const dedupedRecords = dedupeRecordsByLogId(mergedRecords);
+
+      setRecords(dedupedRecords);
 
       setIsPetSheetVisible(false);
       ToastAndroid.show(`${pet.name}으로 변경되었습니다`, ToastAndroid.SHORT);
@@ -1894,23 +2069,41 @@ export default function RecordsScreen() {
                   key={item.id}
                   style={styles.scheduleCard}
                   activeOpacity={0.9}
-                  onLongPress={() => enterDeleteMode(record.id)}
+                  onLongPress={() => {
+                    if (
+                      record.source !== "manual" ||
+                      record.canDelete === false
+                    ) {
+                      show("수동으로 추가한 기록만 삭제할 수 있어요.");
+                      return;
+                    }
+
+                    enterDeleteMode(record.id);
+                  }}
                   onPress={() => {
-                    if (isDeleteMode) {
+                    if (isDeleteMode && record.source === "manual") {
                       toggleManualRecordSelection(record.id);
                     }
                   }}
                 >
                   <View style={[styles.scheduleBar, styles.scheduleBarDone]} />
 
-                  {isDeleteMode ? (
+                  {isDeleteMode &&
+                  record.source === "manual" &&
+                  record.canDelete !== false ? (
                     <TouchableOpacity
                       style={[
                         styles.recordCheckCircle,
                         isSelected && styles.recordCheckCircleSelected,
                       ]}
                       activeOpacity={0.85}
-                      onPress={() => toggleManualRecordSelection(record.id)}
+                      onPress={() => {
+                        if (record.source === "manual") {
+                          toggleManualRecordSelection(record.id);
+                        } else {
+                          show("수동 기록만 삭제할 수 있어요.");
+                        }
+                      }}
                     >
                       {isSelected ? (
                         <Ionicons name="checkmark" size={14} color="#FFFFFF" />

@@ -874,21 +874,21 @@ export default function FeedingHistoryScreen() {
               </Text>
 
               <View style={styles.statRow}>
-                <Text style={styles.statLabel}>준 양</Text>
+                <Text style={styles.statLabel}>급여량</Text>
                 <Text style={styles.statValue}>
                   {dailyConsumption.totalFed}g
                 </Text>
               </View>
 
               <View style={styles.statRow}>
-                <Text style={styles.statLabel}>먹은 양</Text>
+                <Text style={styles.statLabel}>섭취량</Text>
                 <Text style={styles.statValue}>
                   {dailyConsumption.totalConsumption}g
                 </Text>
               </View>
 
               <View style={styles.statRowLast}>
-                <Text style={styles.statLabel}>남은 양</Text>
+                <Text style={styles.statLabel}>미섭취량</Text>
                 <Text style={styles.orangeValue}>
                   {dailyConsumption.totalRemaining}g
                 </Text>

@@ -825,6 +825,9 @@ export default function ProfileScreen() {
             (profile) => profile.id === selectedProfileId,
           );
 
+          console.log("삭제 대상 프로필:", targetProfile);
+          console.log("삭제할 serverPetId:", targetProfile?.serverPetId);
+
           try {
             if (targetProfile?.serverPetId && API_BASE_URL) {
               const response = await fetch(
@@ -836,6 +839,11 @@ export default function ProfileScreen() {
                   },
                 },
               );
+
+              const responseText = await response.text();
+
+              console.log("pet delete status:", response.status);
+              console.log("pet delete response:", responseText);
 
               if (!response.ok) {
                 show("서버에서 반려동물 삭제 실패");
