@@ -19,6 +19,7 @@ type PetProfileItem = {
   id: string;
   name: string;
   petType?: string;
+  createdAt?: string;
 };
 
 type FeedingRecord = {
@@ -31,7 +32,7 @@ type FeedingRecord = {
   eatenAmount?: string;
   time: string;
   sortKey?: number;
-  source?: "alarm" | "manual" | "server";
+  source?: "alarm" | "manual" | "iot" | "server";
   alarmId?: string;
 };
 
@@ -92,6 +93,156 @@ function isSameDate(a: Date, b: Date) {
   );
 }
 
+function getGramNumber(value?: string | number) {
+  if (value === undefined || value === null) return 0;
+  return Number(String(value).replace(/[^0-9.]/g, "")) || 0;
+}
+
+function getRecordSortMinutes(record: FeedingRecord) {
+  const [h, m] = record.time.split(":").map(Number);
+  return h * 60 + m;
+}
+
+function normalizeFoodName(name?: string) {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function isSameFoodRecord(a: FeedingRecord, b: FeedingRecord) {
+  if (a.foodId && b.foodId) {
+    return Number(a.foodId) === Number(b.foodId);
+  }
+
+  return normalizeFoodName(a.foodName) === normalizeFoodName(b.foodName);
+}
+
+function isAutoCorrectionRecord(prev: FeedingRecord, current: FeedingRecord) {
+  if (prev.petId !== current.petId) return false;
+  if (prev.date !== current.date) return false;
+  if (prev.source !== "iot" || current.source !== "iot") return false;
+  if (!isSameFoodRecord(prev, current)) return false;
+
+  const timeDiff = Math.abs(
+    getRecordSortMinutes(prev) - getRecordSortMinutes(current),
+  );
+
+  const prevAmount = getGramNumber(prev.amount);
+  const prevEaten = getGramNumber(prev.eatenAmount);
+  const currentAmount = getGramNumber(current.amount);
+  const currentEaten = getGramNumber(current.eatenAmount);
+
+  const prevRemaining = Math.max(prevAmount - prevEaten, 0);
+
+  return (
+    timeDiff <= 5 &&
+    currentAmount > 0 &&
+    currentAmount === currentEaten &&
+    Math.abs(prevRemaining - currentAmount) <= 1
+  );
+}
+
+function removeAutoCorrectionRecords(records: FeedingRecord[]) {
+  const sortedRecords = records
+    .slice()
+    .sort((a, b) => getRecordSortMinutes(a) - getRecordSortMinutes(b));
+
+  const correctionIds = new Set<string>();
+
+  for (let i = 1; i < sortedRecords.length; i++) {
+    const prev = sortedRecords[i - 1];
+    const current = sortedRecords[i];
+
+    if (isAutoCorrectionRecord(prev, current)) {
+      correctionIds.add(current.id);
+    }
+  }
+
+  return records.filter((record) => !correctionIds.has(record.id));
+}
+
+function getFoodKey(record: FeedingRecord) {
+  return record.foodId
+    ? `foodId:${record.foodId}`
+    : `foodName:${normalizeFoodName(record.foodName)}`;
+}
+
+function calculateAdjustedDailyTotals(records: FeedingRecord[]) {
+  let totalFed = 0;
+  let totalConsumption = 0;
+  let totalRemaining = 0;
+
+  const iotGroups = new Map<string, FeedingRecord[]>();
+
+  records.forEach((record) => {
+    const amount = getGramNumber(record.amount);
+    const eaten = getGramNumber(record.eatenAmount);
+
+    if (record.source !== "iot") {
+      totalFed += amount;
+      totalConsumption += eaten;
+      totalRemaining += Math.max(amount - eaten, 0);
+      return;
+    }
+
+    const key = `${record.petId}-${record.date}-${getFoodKey(record)}`;
+    const group = iotGroups.get(key) ?? [];
+    group.push(record);
+    iotGroups.set(key, group);
+  });
+
+  iotGroups.forEach((group) => {
+    const sorted = group
+      .slice()
+      .sort((a, b) => getRecordSortMinutes(a) - getRecordSortMinutes(b));
+
+    sorted.forEach((record, index) => {
+      const amount = getGramNumber(record.amount);
+      const eaten = getGramNumber(record.eatenAmount);
+      const remaining = Math.max(amount - eaten, 0);
+
+      if (index === 0) {
+        totalFed += amount;
+      } else {
+        const prev = sorted[index - 1];
+        const prevAmount = getGramNumber(prev.amount);
+        const prevEaten = getGramNumber(prev.eatenAmount);
+        const prevRemaining = Math.max(prevAmount - prevEaten, 0);
+
+        totalFed += Math.max(amount - prevRemaining, 0);
+      }
+
+      totalConsumption += eaten;
+      totalRemaining += remaining;
+    });
+  });
+
+  const consumptionRate =
+    totalFed > 0 ? Math.round((totalConsumption / totalFed) * 10000) / 100 : 0;
+
+  return {
+    totalFed,
+    totalConsumption,
+    totalRemaining,
+    consumptionRate,
+  };
+}
+
+function isRecordMatchedToAlarm(record: FeedingRecord, alarm: AlarmItem) {
+  const recordAmount = getGramNumber(record.amount);
+  const alarmAmount = Number(alarm.amount);
+
+  if (recordAmount <= 0 || alarmAmount <= 0) return false;
+
+  const alarmMinutes = getAlarmSortValue(alarm);
+  const recordMinutes = getRecordSortMinutes(record);
+
+  return (
+    Math.abs(recordMinutes - alarmMinutes) <= 30 &&
+    Math.abs(recordAmount - alarmAmount) <= 5
+  );
+}
+
 export default function FeedingHistoryScreen() {
   const { petId } = useLocalSearchParams<{
     petId?: string;
@@ -107,20 +258,12 @@ export default function FeedingHistoryScreen() {
     FeedingRecord[]
   >([]);
 
-  const [dailyConsumption, setDailyConsumption] = useState({
-    totalFed: 0,
-    totalConsumption: 0,
-    totalRemaining: 0,
-    consumptionRate: 0,
-    statusColor: "green",
-  });
-
   const [monthlyConsumptionMap, setMonthlyConsumptionMap] = useState<
     Record<string, string>
   >({});
 
-  const today = new Date();
-  const todayKey = formatDateByDot(today); // ⭐ 추가
+  const today = useMemo(() => new Date(), []);
+  const todayKey = useMemo(() => formatDateByDot(today), [today]);
   const [currentMonth, setCurrentMonth] = useState(
     new Date(today.getFullYear(), today.getMonth(), 1),
   );
@@ -173,6 +316,8 @@ export default function FeedingHistoryScreen() {
             ? petsResult
             : petsResult?.pets || [];
 
+          console.log("serverPets:", serverPets);
+
           loadedProfiles = serverPets
             .map((pet: any) => ({
               id: String(pet.pet_id ?? pet.id),
@@ -183,6 +328,12 @@ export default function FeedingHistoryScreen() {
                   : pet.species === "Cat"
                     ? "고양이"
                     : pet.petType || "",
+              createdAt:
+                pet.created_at ??
+                pet.createdAt ??
+                pet.created_date ??
+                pet.createdDate ??
+                "",
             }))
             .sort(
               (a: PetProfileItem, b: PetProfileItem) =>
@@ -208,6 +359,12 @@ export default function FeedingHistoryScreen() {
           id: String(profile.serverPetId ?? profile.id),
           name: profile.name,
           petType: profile.petType,
+          createdAt:
+            profile.createdAt ??
+            profile.created_at ??
+            profile.createdDate ??
+            profile.created_date ??
+            "",
         }));
       }
 
@@ -267,60 +424,6 @@ export default function FeedingHistoryScreen() {
     }, [userEmail, selectedPetId]),
   );
 
-  const loadDailyConsumption = useCallback(
-    async (targetPetId: string, targetDate: string) => {
-      if (!API_BASE_URL || !targetPetId) return;
-
-      try {
-        const serverDate = targetDate.replace(/\./g, "-");
-
-        const response = await fetch(
-          `${API_BASE_URL}/api/v1/pets/${targetPetId}/consumption?date=${serverDate}`,
-          {
-            headers: {
-              "ngrok-skip-browser-warning": "true",
-            },
-          },
-        );
-
-        if (!response.ok) {
-          console.log("consumption 조회 실패:", response.status);
-
-          setDailyConsumption({
-            totalFed: 0,
-            totalConsumption: 0,
-            totalRemaining: 0,
-            consumptionRate: 0,
-            statusColor: "green",
-          });
-
-          return;
-        }
-
-        const result = await response.json();
-
-        setDailyConsumption({
-          totalFed: Number(result?.total_fed ?? 0),
-          totalConsumption: Number(result?.total_consumption ?? 0),
-          totalRemaining: Number(result?.total_remaining ?? 0),
-          consumptionRate: Number(result?.consumption_rate ?? 0),
-          statusColor: result?.status_color ?? "green",
-        });
-      } catch (error) {
-        console.log("loadDailyConsumption error:", error);
-
-        setDailyConsumption({
-          totalFed: 0,
-          totalConsumption: 0,
-          totalRemaining: 0,
-          consumptionRate: 0,
-          statusColor: "green",
-        });
-      }
-    },
-    [],
-  );
-
   const loadServerSessions = useCallback(
     async (targetPetId: string, targetDate: string) => {
       if (!API_BASE_URL || !targetPetId) return;
@@ -366,11 +469,14 @@ export default function FeedingHistoryScreen() {
               time: timeText || "00:00",
               sortKey:
                 new Date(feedingTime.replace(" ", "T")).getTime() || index,
-              source: "server",
+              source:
+                session.feed_type === "MANUAL" || session.feed_type === "manual"
+                  ? "manual"
+                  : "iot",
             };
           },
         );
-        setServerSessionRecords(serverRecords);
+        setServerSessionRecords(removeAutoCorrectionRecords(serverRecords));
       } catch (error) {
         console.log("loadServerSessions error:", error);
         setServerSessionRecords([]);
@@ -378,81 +484,175 @@ export default function FeedingHistoryScreen() {
     },
     [],
   );
+  useFocusEffect(
+    useCallback(() => {
+      if (selectedPetId && selectedDate) {
+        loadServerSessions(selectedPetId, selectedDate);
+      }
+    }, [selectedPetId, selectedDate, loadServerSessions]),
+  );
 
-  const loadMonthlyConsumption = useCallback(
+  const loadMonthlySessions = useCallback(
     async (targetPetId: string, targetMonth: Date) => {
       if (!API_BASE_URL || !targetPetId) return;
 
-      try {
-        const year = targetMonth.getFullYear();
-        const month = String(targetMonth.getMonth() + 1).padStart(2, "0");
+      const year = targetMonth.getFullYear();
+      const month = targetMonth.getMonth();
+      const lastDate = new Date(year, month + 1, 0).getDate();
 
-        const response = await fetch(
-          `${API_BASE_URL}/api/v1/pets/${targetPetId}/monthly-consumption?month=${year}-${month}`,
-          {
-            headers: {
-              "ngrok-skip-browser-warning": "true",
-            },
-          },
-        );
+      const targetDates = Array.from({ length: lastDate }, (_, index) => {
+        const dateObj = new Date(year, month, index + 1);
+        return dateObj;
+      }).filter((dateObj) => dateObj <= today);
 
-        if (!response.ok) {
-          console.log("monthly-consumption 조회 실패:", response.status);
-          setMonthlyConsumptionMap({});
-          return;
-        }
+      const results = await Promise.all(
+        targetDates.map(async (dateObj) => {
+          const dotDate = formatDateByDot(dateObj);
+          const hyphenDate = formatDateByHyphen(dateObj);
 
-        const result = await response.json();
-        console.log("monthly-consumption 응답:", result);
+          try {
+            const response = await fetch(
+              `${API_BASE_URL}/api/v1/pets/${targetPetId}/sessions?date=${hyphenDate}`,
+              {
+                headers: {
+                  "ngrok-skip-browser-warning": "true",
+                },
+              },
+            );
 
-        const list = Array.isArray(result)
-          ? result
-          : Array.isArray(result?.data)
-            ? result.data
-            : [];
+            if (!response.ok) return null;
 
-        const nextMap: Record<string, string> = {};
+            const result = await response.json();
+            const sessions = Array.isArray(result?.sessions)
+              ? result.sessions
+              : [];
 
-        list.forEach((item: any) => {
-          const date = String(item.date ?? "");
-          const statusColor = String(item.status_color ?? "");
+            const dayRecords: FeedingRecord[] = sessions
+              .map((session: any, index: number): FeedingRecord => {
+                const feedingTime = String(session.feeding_time ?? "");
+                const timeText = feedingTime.includes("T")
+                  ? feedingTime.slice(11, 16)
+                  : feedingTime.includes(" ")
+                    ? feedingTime.slice(11, 16)
+                    : feedingTime.slice(0, 5);
 
-          if (date && statusColor) {
-            nextMap[date] = statusColor;
+                return {
+                  id: `month-${targetPetId}-${hyphenDate}-${index}`,
+                  petId: targetPetId,
+                  date: dotDate,
+                  foodId: session.current_food_id ?? session.food_id,
+                  foodName: session.food_name ?? "사료",
+                  amount: `${Number(session.fed_amount ?? 0)}g`,
+                  eatenAmount: `${Number(session.consumed_amount ?? 0)}g`,
+                  time: timeText || "00:00",
+                  source:
+                    session.feed_type === "MANUAL" ||
+                    session.feed_type === "manual"
+                      ? "manual"
+                      : "iot",
+                };
+              })
+              .filter(
+                (record: FeedingRecord) => getGramNumber(record.amount) > 0,
+              );
+
+            const cleanedDayRecords = removeAutoCorrectionRecords(dayRecords);
+
+            const dayKor = DAYS[dateObj.getDay()];
+            const dayAlarms = alarms
+              .filter((alarm) => alarm.enabled && alarm.days?.includes(dayKor))
+              .sort((a, b) => getAlarmSortValue(a) - getAlarmSortValue(b));
+
+            const usedRecordIds = new Set<string>();
+            const completedRecords: FeedingRecord[] = [];
+
+            dayAlarms.forEach((alarm) => {
+              const alarmMinutes = getAlarmSortValue(alarm);
+
+              const matchedRecord = cleanedDayRecords
+                .filter((record) => !usedRecordIds.has(record.id))
+                .filter((record) => isRecordMatchedToAlarm(record, alarm))
+                .sort((a, b) => {
+                  if (a.source === "iot" && b.source !== "iot") return -1;
+                  if (a.source !== "iot" && b.source === "iot") return 1;
+
+                  return (
+                    Math.abs(getRecordSortMinutes(a) - alarmMinutes) -
+                    Math.abs(getRecordSortMinutes(b) - alarmMinutes)
+                  );
+                })[0];
+
+              if (matchedRecord) {
+                completedRecords.push(matchedRecord);
+
+                cleanedDayRecords
+                  .filter((record) => !usedRecordIds.has(record.id))
+                  .filter((record) => {
+                    const timeDiff = Math.abs(
+                      getRecordSortMinutes(record) - alarmMinutes,
+                    );
+
+                    return (
+                      timeDiff <= 30 &&
+                      getGramNumber(record.amount) > 0 &&
+                      Math.abs(
+                        getGramNumber(record.amount) -
+                          getGramNumber(matchedRecord.amount),
+                      ) <= 5
+                    );
+                  })
+                  .forEach((record) => usedRecordIds.add(record.id));
+              }
+            });
+
+            cleanedDayRecords
+              .filter((record) => !usedRecordIds.has(record.id))
+              .forEach((record) => completedRecords.push(record));
+
+            if (completedRecords.length === 0) return null;
+
+            const adjustedTotals =
+              calculateAdjustedDailyTotals(completedRecords);
+
+            const rate = adjustedTotals.consumptionRate;
+
+            if (rate >= 90) return [hyphenDate, "green"] as const;
+            if (rate >= 70) return [hyphenDate, "orange"] as const;
+            return [hyphenDate, "red"] as const;
+          } catch (error) {
+            console.log("월간 sessions 조회 실패:", hyphenDate, error);
+            return null;
           }
-        });
+        }),
+      );
 
-        console.log("monthly-consumption map:", nextMap);
-        setMonthlyConsumptionMap(nextMap);
-      } catch (error) {
-        console.log("loadMonthlyConsumption error:", error);
-        setMonthlyConsumptionMap({});
-      }
+      const nextMap: Record<string, string> = {};
+
+      results.forEach((item) => {
+        if (!item) return;
+        const [date, color] = item;
+        nextMap[date] = color;
+      });
+
+      setMonthlyConsumptionMap(nextMap);
     },
-    [],
+    [alarms, today],
   );
 
   useFocusEffect(
     useCallback(() => {
       if (selectedPetId) {
-        loadMonthlyConsumption(selectedPetId, currentMonth);
+        loadMonthlySessions(selectedPetId, currentMonth);
       }
-    }, [selectedPetId, currentMonth, loadMonthlyConsumption]),
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      if (selectedPetId && selectedDate) {
-        loadServerSessions(selectedPetId, selectedDate);
-        loadDailyConsumption(selectedPetId, selectedDate);
-      }
-    }, [selectedPetId, selectedDate, loadServerSessions, loadDailyConsumption]),
+    }, [selectedPetId, currentMonth, loadMonthlySessions]),
   );
 
   const selectedDateRecords = useMemo(() => {
     return serverSessionRecords.filter(
       (record) =>
-        record.petId === selectedPetId && record.date === selectedDate,
+        record.petId === selectedPetId &&
+        record.date === selectedDate &&
+        getGramNumber(record.amount) > 0,
     );
   }, [serverSessionRecords, selectedPetId, selectedDate]);
 
@@ -472,19 +672,38 @@ export default function FeedingHistoryScreen() {
     selectedDateAlarms.forEach((alarm) => {
       const alarmMinutes = getAlarmSortValue(alarm);
 
-      const matchedRecord = selectedDateRecords.find((record) => {
-        if (usedRecordIds.has(record.id)) return false;
+      const matchedRecord = selectedDateRecords
+        .filter((record) => !usedRecordIds.has(record.id))
+        .filter((record) => isRecordMatchedToAlarm(record, alarm))
+        .sort((a, b) => {
+          if (a.source === "iot" && b.source !== "iot") return -1;
+          if (a.source !== "iot" && b.source === "iot") return 1;
 
-        const [h, m] = record.time.split(":").map(Number);
-        const recordMinutes = h * 60 + m;
-
-        return (
-          recordMinutes >= alarmMinutes && recordMinutes <= alarmMinutes + 120
-        );
-      });
+          return (
+            Math.abs(getRecordSortMinutes(a) - alarmMinutes) -
+            Math.abs(getRecordSortMinutes(b) - alarmMinutes)
+          );
+        })[0];
 
       if (matchedRecord) {
-        usedRecordIds.add(matchedRecord.id);
+        selectedDateRecords
+          .filter((record) => !usedRecordIds.has(record.id))
+          .filter((record) => {
+            const timeDiff = Math.abs(
+              getRecordSortMinutes(record) - alarmMinutes,
+            );
+
+            return (
+              timeDiff <= 30 &&
+              getGramNumber(record.amount) > 0 &&
+              Math.abs(
+                getGramNumber(record.amount) -
+                  getGramNumber(matchedRecord.amount),
+              ) <= 5
+            );
+          })
+          .forEach((record) => usedRecordIds.add(record.id));
+
         matchedIds.add(alarm.id);
       }
     });
@@ -509,36 +728,27 @@ export default function FeedingHistoryScreen() {
     });
   }, [selectedDateAlarms, matchedAlarmIds, selectedDate]);
 
-  const dailyStats = useMemo(() => {
-    const completedCount = selectedDateRecords.length;
-    const missedCount = missedAlarms.length;
-    const targetCount = completedCount + missedCount;
-
-    return {
-      targetCount,
-      completedCount,
-      missedCount,
-    };
-  }, [selectedDateRecords, missedAlarms]);
-
   const insightMessages = useMemo(() => {
     const messages: string[] = [];
 
-    const rates = Object.entries(monthlyConsumptionMap)
-      .map(([_, status]) => {
-        if (status === "green") return 95;
-        if (status === "orange") return 80;
-        if (status === "red") return 60;
-        return null;
-      })
-      .filter((v): v is 95 | 80 | 60 => v !== null);
+    const getRateFromStatus = (status: string): number | null => {
+      if (status === "green" || status === "초록") return 95;
+      if (status === "orange" || status === "주황" || status === "노랑")
+        return 80;
+      if (status === "red" || status === "빨강" || status === "빨간") return 60;
+      return null;
+    };
+
+    const rates = Object.values(monthlyConsumptionMap)
+      .filter((v): v is string => typeof v === "string")
+      .map(getRateFromStatus)
+      .filter((v): v is number => v !== null);
 
     if (rates.length >= 14) {
       const recent7 = rates.slice(-7);
       const prev7 = rates.slice(-14, -7);
 
       const recentAvg = recent7.reduce((a, b) => a + b, 0) / recent7.length;
-
       const prevAvg = prev7.reduce((a, b) => a + b, 0) / prev7.length;
 
       const diff = Math.round(recentAvg - prevAvg);
@@ -552,56 +762,220 @@ export default function FeedingHistoryScreen() {
       }
     }
 
-    if (dailyStats.missedCount >= 2) {
+    const statuses = Object.values(monthlyConsumptionMap).filter(
+      (v): v is string => typeof v === "string",
+    );
+
+    const redDays = statuses.filter(
+      (v) => v === "red" || v === "빨강" || v === "빨간",
+    ).length;
+
+    const orangeDays = statuses.filter(
+      (v) => v === "orange" || v === "주황" || v === "노랑",
+    ).length;
+
+    if (missedAlarms.length >= 2) {
       messages.push("최근 미급여 발생 빈도가 증가하고 있어요.");
     }
 
-    const redDays = Object.values(monthlyConsumptionMap).filter(
-      (v) => v === "red",
-    ).length;
-
-    if (redDays <= 2) {
-      messages.push("최근 섭취 패턴이 안정적으로 유지되고 있어요.");
+    if (redDays >= 3) {
+      messages.push("최근 섭취율이 낮은 날이 반복되고 있어요.");
+    } else if (redDays >= 1) {
+      messages.push("일부 날짜에서 섭취율 저하가 확인돼요.");
+    } else if (orangeDays >= 2) {
+      messages.push("최근 섭취율이 보통 수준으로 유지되고 있어요.");
     } else {
-      messages.push("최근 섭취 패턴 변화가 감지되고 있어요.");
+      messages.push("최근 섭취 패턴이 안정적으로 유지되고 있어요.");
     }
 
     return messages;
-  }, [monthlyConsumptionMap, dailyStats.missedCount]);
+  }, [monthlyConsumptionMap, missedAlarms.length]);
 
   const timelineItems = useMemo(() => {
-    const recordItems = selectedDateRecords.map((record) => {
-      const [h, m] = record.time.split(":");
+    const usedRecordIds = new Set<string>();
+
+    const alarmItems = selectedDateAlarms.map((alarm) => {
+      const alarmMinutes = getAlarmSortValue(alarm);
+
+      const matchedRecord = selectedDateRecords
+        .filter((record) => !usedRecordIds.has(record.id))
+        .filter((record) => isRecordMatchedToAlarm(record, alarm))
+        .sort((a, b) => {
+          if (a.source === "iot" && b.source !== "iot") return -1;
+          if (a.source !== "iot" && b.source === "iot") return 1;
+
+          return (
+            Math.abs(getRecordSortMinutes(a) - alarmMinutes) -
+            Math.abs(getRecordSortMinutes(b) - alarmMinutes)
+          );
+        })[0];
+
+      if (matchedRecord) {
+        selectedDateRecords
+          .filter((record) => !usedRecordIds.has(record.id))
+          .filter((record) => {
+            const timeDiff = Math.abs(
+              getRecordSortMinutes(record) - alarmMinutes,
+            );
+
+            return (
+              timeDiff <= 30 &&
+              getGramNumber(record.amount) > 0 &&
+              Math.abs(
+                getGramNumber(record.amount) -
+                  getGramNumber(matchedRecord.amount),
+              ) <= 5
+            );
+          })
+          .forEach((record) => usedRecordIds.add(record.id));
+      }
 
       return {
-        id: `record-${record.id}`,
-        type: "record" as const,
-        sortMinutes: Number(h) * 60 + Number(m),
-        record,
+        id: `alarm-${alarm.id}`,
+        type: matchedRecord ? ("record" as const) : ("missed" as const),
+        sortMinutes: alarmMinutes,
+        alarm,
+        record: matchedRecord,
       };
     });
 
-    const missedItems = missedAlarms.map((alarm) => ({
-      id: `missed-${alarm.id}`,
-      type: "missed" as const,
-      sortMinutes: getAlarmSortValue(alarm),
-      alarm,
-    }));
+    const recordItems = selectedDateRecords
+      .filter((record) => !usedRecordIds.has(record.id))
+      .map((record) => ({
+        id: `record-${record.id}`,
+        type: "record" as const,
+        sortMinutes: getRecordSortMinutes(record),
+        record,
+      }));
 
-    return [...recordItems, ...missedItems].sort(
-      (a, b) => a.sortMinutes - b.sortMinutes,
+    return [...alarmItems, ...recordItems]
+      .filter(
+        (item) =>
+          item.type === "record" ||
+          missedAlarms.some((missed) => `alarm-${missed.id}` === item.id),
+      )
+      .sort((a, b) => a.sortMinutes - b.sortMinutes);
+  }, [selectedDateAlarms, selectedDateRecords, missedAlarms]);
+
+  const dailyStats = useMemo(() => {
+    const completedCount = timelineItems.filter(
+      (item) => item.type === "record",
+    ).length;
+
+    const missedCount = missedAlarms.length;
+
+    const isToday = selectedDate === todayKey;
+
+    const remainingAlarmCount = selectedDateAlarms.filter(
+      (alarm) => !matchedAlarmIds.has(alarm.id),
+    ).length;
+
+    const targetCount = isToday
+      ? completedCount + remainingAlarmCount
+      : completedCount + missedCount;
+
+    return {
+      targetCount,
+      completedCount,
+      missedCount,
+    };
+  }, [
+    timelineItems,
+    missedAlarms,
+    selectedDate,
+    todayKey,
+    selectedDateAlarms,
+    matchedAlarmIds,
+  ]);
+
+  const displayDailyConsumption = useMemo(() => {
+    const records = timelineItems
+      .filter((item) => item.type === "record")
+      .map((item) => item.record);
+
+    return calculateAdjustedDailyTotals(records);
+  }, [timelineItems]);
+
+  const hasMissedAlarmOnDate = (date: Date) => {
+    const dateKey = formatDateByDot(date);
+    const dayKor = DAYS[date.getDay()];
+
+    const targetAlarms = alarms.filter(
+      (alarm) => alarm.enabled && alarm.days?.includes(dayKor),
     );
-  }, [selectedDateRecords, missedAlarms]);
+
+    return targetAlarms.some((alarm) => {
+      const alarmDate = parseDotDate(dateKey);
+
+      alarmDate.setHours(to24Hour(alarm.period, alarm.hour));
+      alarmDate.setMinutes(Number(alarm.minute));
+      alarmDate.setSeconds(0);
+      alarmDate.setMilliseconds(0);
+
+      const missedBase = new Date(alarmDate);
+      missedBase.setHours(missedBase.getHours() + 2);
+
+      return missedBase < new Date();
+    });
+  };
+
+  const getFirstMonthlyDataDate = () => {
+    const dates = Object.keys(monthlyConsumptionMap).sort();
+    if (dates.length === 0) return null;
+
+    return new Date(dates[0]);
+  };
+
+  const isBeforeFirstMonthlyDataDate = (date: Date) => {
+    const firstDate = getFirstMonthlyDataDate();
+    if (!firstDate) return false;
+
+    const targetDate = new Date(date);
+    targetDate.setHours(0, 0, 0, 0);
+    firstDate.setHours(0, 0, 0, 0);
+
+    return targetDate < firstDate;
+  };
+
+  const isSelectedDateBeforeStart = isBeforeFirstMonthlyDataDate(
+    parseDotDate(selectedDate),
+  );
 
   const getDotColor = (date: Date) => {
+    // 오늘은 아직 하루가 끝나지 않았으므로 점 없음
+    if (isSameDate(date, today)) return null;
+
+    // 첫 월별 데이터 이전 날짜는 점 없음
+    if (isBeforeFirstMonthlyDataDate(date)) return null;
+
     const dateKey = formatDateByHyphen(date);
     const statusColor = monthlyConsumptionMap[dateKey];
 
-    if (!statusColor) return null;
+    // 서버 데이터가 있으면 서버 색상 우선
+    if (statusColor) {
+      if (statusColor === "green" || statusColor === "초록") return "#2F6B57";
 
-    if (statusColor === "green" || statusColor === "초록") return "#2F6B57";
-    if (statusColor === "orange" || statusColor === "주황") return "#D9822B";
-    if (statusColor === "red" || statusColor === "빨강") return "#D14A3A";
+      if (
+        statusColor === "orange" ||
+        statusColor === "주황" ||
+        statusColor === "노랑"
+      ) {
+        return "#D9822B";
+      }
+
+      if (
+        statusColor === "red" ||
+        statusColor === "빨강" ||
+        statusColor === "빨간"
+      ) {
+        return "#D14A3A";
+      }
+    }
+
+    // 서버 데이터는 없지만, 첫 데이터 이후 과거 날짜에 미지급 알람이 있으면 빨간 점
+    if (hasMissedAlarmOnDate(date)) {
+      return "#D14A3A";
+    }
 
     return null;
   };
@@ -841,7 +1215,11 @@ export default function FeedingHistoryScreen() {
           ))}
         </View>
 
-        {timelineItems.length === 0 ? (
+        {isSelectedDateBeforeStart ? (
+          <View style={styles.emptyWrap}>
+            <Text style={styles.emptyTitle}>급여 기록이 없어요</Text>
+          </View>
+        ) : timelineItems.length === 0 ? (
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyTitle}>
               {selectedDate === todayKey
@@ -862,35 +1240,35 @@ export default function FeedingHistoryScreen() {
                   styles.intakeRateText,
                   {
                     color:
-                      dailyConsumption.consumptionRate >= 90
+                      displayDailyConsumption.consumptionRate >= 90
                         ? "#2F6B57"
-                        : dailyConsumption.consumptionRate >= 70
+                        : displayDailyConsumption.consumptionRate >= 70
                           ? "#D9822B"
                           : "#D14A3A",
                   },
                 ]}
               >
-                섭취율: {dailyConsumption.consumptionRate}%
+                섭취율: {displayDailyConsumption.consumptionRate}%
               </Text>
 
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>급여량</Text>
                 <Text style={styles.statValue}>
-                  {dailyConsumption.totalFed}g
+                  {displayDailyConsumption.totalFed}g
                 </Text>
               </View>
 
               <View style={styles.statRow}>
                 <Text style={styles.statLabel}>섭취량</Text>
                 <Text style={styles.statValue}>
-                  {dailyConsumption.totalConsumption}g
+                  {displayDailyConsumption.totalConsumption}g
                 </Text>
               </View>
 
               <View style={styles.statRowLast}>
                 <Text style={styles.statLabel}>미섭취량</Text>
                 <Text style={styles.orangeValue}>
-                  {dailyConsumption.totalRemaining}g
+                  {displayDailyConsumption.totalRemaining}g
                 </Text>
               </View>
             </View>

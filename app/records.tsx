@@ -217,7 +217,11 @@ function isSameFood(a: FeedingRecord, b: FeedingRecord) {
 function isDuplicateManualAndIot(a: FeedingRecord, b: FeedingRecord) {
   if (a.petId !== b.petId) return false;
   if (a.date !== b.date) return false;
-  if (getGramNumber(a.amount) !== getGramNumber(b.amount)) return false;
+  const amountDiff = Math.abs(
+    getGramNumber(a.amount) - getGramNumber(b.amount),
+  );
+
+  if (amountDiff > 5) return false;
   if (!isSameFood(a, b)) return false;
 
   const isManualIotPair =
@@ -229,6 +233,115 @@ function isDuplicateManualAndIot(a: FeedingRecord, b: FeedingRecord) {
   const timeDiff = Math.abs(getRecordMinutes(a) - getRecordMinutes(b));
 
   return timeDiff <= 5;
+}
+
+function isAutoCorrectionRecord(prev: FeedingRecord, current: FeedingRecord) {
+  if (prev.petId !== current.petId) return false;
+  if (prev.date !== current.date) return false;
+  if (prev.source !== "iot" || current.source !== "iot") return false;
+  if (!isSameFood(prev, current)) return false;
+
+  const timeDiff = Math.abs(getRecordMinutes(prev) - getRecordMinutes(current));
+
+  const prevAmount = getGramNumber(prev.amount);
+  const prevEaten = getGramNumber(prev.eatenAmount);
+  const currentAmount = getGramNumber(current.amount);
+  const currentEaten = getGramNumber(current.eatenAmount);
+
+  const prevRemaining = Math.max(prevAmount - prevEaten, 0);
+
+  return (
+    timeDiff <= 5 &&
+    currentAmount > 0 &&
+    currentAmount === currentEaten &&
+    Math.abs(prevRemaining - currentAmount) <= 1
+  );
+}
+
+function removeAutoCorrectionRecords(records: FeedingRecord[]) {
+  const sortedRecords = records
+    .slice()
+    .sort((a, b) => getRecordMinutes(a) - getRecordMinutes(b));
+
+  const correctionIds = new Set<string>();
+
+  for (let i = 1; i < sortedRecords.length; i++) {
+    const prev = sortedRecords[i - 1];
+    const current = sortedRecords[i];
+
+    if (isAutoCorrectionRecord(prev, current)) {
+      correctionIds.add(current.id);
+    }
+  }
+
+  return records.filter((record) => !correctionIds.has(record.id));
+}
+
+function getFoodKey(record: FeedingRecord) {
+  return record.foodId
+    ? `foodId:${record.foodId}`
+    : `foodName:${normalizeFoodName(record.foodName)}`;
+}
+
+function calculateAdjustedDailyTotals(records: FeedingRecord[]) {
+  let totalFed = 0;
+  let totalConsumption = 0;
+  let totalRemaining = 0;
+
+  const iotGroups = new Map<string, FeedingRecord[]>();
+
+  records.forEach((record) => {
+    const amount = getGramNumber(record.amount);
+    const eaten = getGramNumber(record.eatenAmount);
+
+    if (record.source !== "iot") {
+      totalFed += amount;
+      totalConsumption += eaten;
+      totalRemaining += Math.max(amount - eaten, 0);
+      return;
+    }
+
+    const key = `${record.petId}-${record.date}-${getFoodKey(record)}`;
+    const group = iotGroups.get(key) ?? [];
+    group.push(record);
+    iotGroups.set(key, group);
+  });
+
+  iotGroups.forEach((group) => {
+    const sorted = group
+      .slice()
+      .sort((a, b) => getRecordMinutes(a) - getRecordMinutes(b));
+
+    sorted.forEach((record, index) => {
+      const amount = getGramNumber(record.amount);
+      const eaten = getGramNumber(record.eatenAmount);
+      const remaining = Math.max(amount - eaten, 0);
+
+      if (index === 0) {
+        totalFed += amount;
+      } else {
+        const prev = sorted[index - 1];
+        const prevAmount = getGramNumber(prev.amount);
+        const prevEaten = getGramNumber(prev.eatenAmount);
+        const prevRemaining = Math.max(prevAmount - prevEaten, 0);
+
+        totalFed += Math.max(amount - prevRemaining, 0);
+      }
+
+      totalConsumption += eaten;
+      totalRemaining += remaining;
+    });
+  });
+
+  const consumptionRate =
+    totalFed > 0 ? Math.round((totalConsumption / totalFed) * 10000) / 100 : 0;
+
+  return {
+    totalFed,
+    totalConsumption,
+    totalRemaining,
+    consumptionRate,
+  };
 }
 
 function mergeFeedingRecords(
@@ -305,6 +418,8 @@ async function requestJson(url: string, options: RequestInit) {
     },
   });
 
+  console.log("삭제 status:", response.status);
+
   let data: any = null;
   try {
     data = await response.json();
@@ -328,13 +443,6 @@ export default function RecordsScreen() {
   const [selectedPetId, setSelectedPetId] = useState<string>("");
 
   const [records, setRecords] = useState<FeedingRecord[]>([]);
-
-  const [todayConsumption, setTodayConsumption] = useState({
-    totalFed: 0,
-    totalConsumption: 0,
-    totalRemaining: 0,
-    consumptionRate: 0,
-  });
 
   const [nearestAlarm, setNearestAlarm] = useState<AlarmItem | null>(null);
   const [hasAnyEnabledAlarm, setHasAnyEnabledAlarm] = useState(false);
@@ -539,7 +647,7 @@ export default function RecordsScreen() {
             0,
         );
 
-        const feedAmount = rawFeedAmount > 0 ? rawFeedAmount : consumedAmount;
+        const feedAmount = rawFeedAmount;
 
         const isManual =
           session.feed_type === "MANUAL" || session.feed_type === "manual";
@@ -566,48 +674,6 @@ export default function RecordsScreen() {
       return [];
     }
   };
-
-  const loadTodayConsumption = useCallback(async (petId: string) => {
-    if (!API_BASE_URL || !petId) return;
-
-    try {
-      const today = formatDate().replace(/\./g, "-");
-
-      const response = await fetch(
-        `${API_BASE_URL}/api/v1/pets/${petId}/consumption?date=${today}`,
-        {
-          headers: {
-            "ngrok-skip-browser-warning": "true",
-          },
-        },
-      );
-
-      if (!response.ok) {
-        console.log("오늘 consumption 조회 실패:", response.status);
-        show("오늘 급여 요약을 불러오지 못했어요.");
-
-        setTodayConsumption({
-          totalFed: 0,
-          totalConsumption: 0,
-          totalRemaining: 0,
-          consumptionRate: 0,
-        });
-        return;
-      }
-
-      const result = await response.json();
-
-      setTodayConsumption({
-        totalFed: Number(result?.total_fed ?? 0),
-        totalConsumption: Number(result?.total_consumption ?? 0),
-        totalRemaining: Number(result?.total_remaining ?? 0),
-        consumptionRate: Number(result?.consumption_rate ?? 0),
-      });
-    } catch (error) {
-      console.log("loadTodayConsumption error:", error);
-      show("서버 연결이 불안정해 통계 정보를 불러오지 못했어요.");
-    }
-  }, []);
 
   const loadProfilesAndRecords = useCallback(async () => {
     try {
@@ -828,21 +894,33 @@ export default function RecordsScreen() {
 
       const sessionRecords = await loadIoTRecords(petIdForFoods, email);
 
-      const serverManualRecords = sessionRecords.filter(
+      const cleanedSessionRecords = removeAutoCorrectionRecords(sessionRecords);
+
+      const serverManualRecords = cleanedSessionRecords.filter(
         (record) => record.source === "manual",
       );
 
-      const iotRecords = sessionRecords.filter(
+      const iotRecords = cleanedSessionRecords.filter(
         (record) => record.source === "iot",
       );
 
-      const localOnlyManualRecords = manualRecords.filter(
-        (localRecord) =>
-          !localRecord.logId ||
-          !serverManualRecords.some(
-            (serverRecord) => serverRecord.logId === localRecord.logId,
-          ),
-      );
+      const localOnlyManualRecords = manualRecords.filter((localRecord) => {
+        if (localRecord.logId) return false;
+
+        return !serverManualRecords.some((serverRecord) => {
+          return (
+            serverRecord.petId === localRecord.petId &&
+            serverRecord.date === localRecord.date &&
+            normalizeRecordTime(serverRecord.time) ===
+              normalizeRecordTime(localRecord.time) &&
+            isSameFood(serverRecord, localRecord) &&
+            getGramNumber(serverRecord.amount) ===
+              getGramNumber(localRecord.amount) &&
+            getGramNumber(serverRecord.eatenAmount) ===
+              getGramNumber(localRecord.eatenAmount)
+          );
+        });
+      });
 
       const mergedRecords = mergeFeedingRecords(
         [...serverManualRecords, ...localOnlyManualRecords],
@@ -919,13 +997,6 @@ export default function RecordsScreen() {
       loadPetAlarms();
     }, [userEmail, selectedPetId]),
   );
-  useFocusEffect(
-    useCallback(() => {
-      if (selectedPetId) {
-        loadTodayConsumption(selectedPetId);
-      }
-    }, [selectedPetId, loadTodayConsumption]),
-  );
 
   const filteredRecords = useMemo(() => {
     return records
@@ -968,11 +1039,9 @@ export default function RecordsScreen() {
     const recordAmount = getGramNumber(record.amount);
     const alarmAmount = Number(alarm.amount);
 
-    if (!alarmAmount || !recordAmount) return false;
+    if (alarmAmount <= 0 || recordAmount <= 0) return false;
 
-    const tolerance = alarmAmount * 0.1;
-
-    return Math.abs(recordAmount - alarmAmount) <= tolerance;
+    return Math.abs(recordAmount - alarmAmount) <= 5;
   };
 
   const isRecordMatchedToAlarm = useCallback(
@@ -1012,7 +1081,22 @@ export default function RecordsScreen() {
       const matchedRecord = matchedCandidates[0];
 
       if (matchedRecord) {
-        usedRecordIds.add(matchedRecord.id);
+        todayRecordCards
+          .filter((record) => !usedRecordIds.has(record.id))
+          .filter((record) => {
+            const recordMinutes = getRecordSortMinutes(record);
+            const timeDiff = Math.abs(recordMinutes - alarmMinutes);
+
+            return (
+              timeDiff <= 30 &&
+              getGramNumber(record.amount) > 0 &&
+              Math.abs(
+                getGramNumber(record.amount) -
+                  getGramNumber(matchedRecord.amount),
+              ) <= 5
+            );
+          })
+          .forEach((record) => usedRecordIds.add(record.id));
       }
 
       return {
@@ -1072,20 +1156,27 @@ export default function RecordsScreen() {
   );
 
   const todayStats = useMemo(() => {
-    const givenAmount = todayConsumption.totalFed;
+    const completedItems = combinedTimelineItems.filter((item) => {
+      if (item.type === "alarm") return Boolean(item.matchedRecord);
+      return item.type === "manual";
+    });
 
-    const eatenAmount = todayConsumption.totalConsumption;
+    const completedRecords = completedItems
+      .map((item) => (item.type === "alarm" ? item.matchedRecord : item.record))
+      .filter((record): record is FeedingRecord => Boolean(record));
+
+    const adjustedTotals = calculateAdjustedDailyTotals(completedRecords);
 
     const missedCount = todayFeedingSchedules.filter((alarm) =>
       isMissedAlarm(alarm),
     ).length;
 
     return {
-      givenAmount,
-      eatenAmount,
+      givenAmount: adjustedTotals.totalFed,
+      eatenAmount: adjustedTotals.totalConsumption,
       missedCount,
     };
-  }, [todayConsumption, todayFeedingSchedules, isMissedAlarm]);
+  }, [combinedTimelineItems, todayFeedingSchedules, isMissedAlarm]);
 
   const previewAlarm = useMemo(() => {
     return nearestAlarm;
@@ -1286,15 +1377,13 @@ export default function RecordsScreen() {
       setRecords(updatedRecords);
 
       const localRecordsToSave = updatedRecords.filter(
-        (record) => record.source === "manual",
+        (record) => record.source === "manual" && !record.logId,
       );
 
       await AsyncStorage.setItem(
         storageKeys.feedingRecords(userEmail),
         JSON.stringify(localRecordsToSave),
       );
-
-      await loadTodayConsumption(selectedPetId);
 
       show("급여 기록이 저장되었습니다.");
       closeAddModal();
@@ -1349,7 +1438,9 @@ export default function RecordsScreen() {
             body: JSON.stringify({
               pet_id: Number(record.petId),
               feed_amount: getGramNumber(record.amount),
-              feed_time: `${record.date.replace(/\./g, "-")} ${record.time}:00`,
+              feed_time:
+                record.serverFeedTime ??
+                `${record.date.replace(/\./g, "-")} ${record.time}:00`,
             }),
           },
         );
@@ -1365,15 +1456,13 @@ export default function RecordsScreen() {
       setRecords(updatedRecords);
 
       const localRecordsToSave = updatedRecords.filter(
-        (record) => record.source === "manual",
+        (record) => record.source === "manual" && !record.logId,
       );
 
       await AsyncStorage.setItem(
         storageKeys.feedingRecords(userEmail),
         JSON.stringify(localRecordsToSave),
       );
-
-      await loadTodayConsumption(selectedPetId);
 
       show("급여 기록이 삭제되었습니다.");
 
@@ -2009,17 +2098,22 @@ export default function RecordsScreen() {
 
                       <Text style={styles.scheduleFoodSimple}>
                         {isDone && alarmRecord ? (
-                          <>
-                            <Text style={styles.plannedFoodText}>
-                              예정: {alarm.foodName}
-                            </Text>
+                          normalizeFoodName(alarm.foodName) ===
+                          normalizeFoodName(alarmRecord.foodName) ? (
+                            alarm.foodName
+                          ) : (
+                            <>
+                              <Text style={styles.plannedFoodText}>
+                                예정: {alarm.foodName}
+                              </Text>
 
-                            {" / "}
+                              {" / "}
 
-                            <Text style={styles.scheduleFoodSimple}>
-                              실급여: {alarmRecord.foodName}
-                            </Text>
-                          </>
+                              <Text style={styles.scheduleFoodSimple}>
+                                실급여: {alarmRecord.foodName}
+                              </Text>
+                            </>
+                          )
                         ) : (
                           alarm.foodName
                         )}
@@ -2027,14 +2121,22 @@ export default function RecordsScreen() {
 
                       <Text style={styles.scheduleSubSimple}>
                         {isDone && alarmRecord ? (
-                          <>
-                            <Text style={styles.plannedAmountText}>
-                              예정량 {alarm.amount}g
-                            </Text>
-                            {" / "}
-                            실급여량 {alarmRecord.amount}, 섭취량{" "}
-                            {alarmRecord.eatenAmount ?? alarmRecord.amount}
-                          </>
+                          Number(alarm.amount) ===
+                          getGramNumber(alarmRecord.amount) ? (
+                            <>
+                              급여량 {alarmRecord.amount}, 섭취량{" "}
+                              {alarmRecord.eatenAmount ?? alarmRecord.amount}
+                            </>
+                          ) : (
+                            <>
+                              <Text style={styles.plannedAmountText}>
+                                예정량 {alarm.amount}g
+                              </Text>
+                              {" / "}
+                              실급여량 {alarmRecord.amount}, 섭취량{" "}
+                              {alarmRecord.eatenAmount ?? alarmRecord.amount}
+                            </>
+                          )
                         ) : (
                           <>
                             <Text style={styles.plannedAmountText}>

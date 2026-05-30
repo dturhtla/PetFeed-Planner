@@ -40,7 +40,7 @@ import type { ChatReplyLocale } from "../utils/chatLocale";
 import {
   fixGluedNumberedListStarts,
   inferUserMessageLocale,
-  wrapUserMessageForModelLanguage
+  wrapUserMessageForModelLanguage,
 } from "../utils/chatLocale";
 import { buildChatPetContextBlock } from "../utils/chatPetContext";
 import {
@@ -102,21 +102,20 @@ Pet photos in this chat:
  * Free tier quotas are per-model (e.g. flash-lite has its own daily cap). If one is exhausted,
  * we fall back to other models instead of only using flash-lite.
  */
-const TEXT_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-flash",
-] as const;
+const TEXT_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"] as const;
 
 /** Retry with the next model on quota, rate limit, or temporary overload (503). */
 function isRetryableGeminiError(err: unknown): boolean {
   const e = err as { status?: number; message?: string };
   const msg = (e?.message || "").toLowerCase();
   return (
+    e?.status === 404 ||
     e?.status === 429 ||
     e?.status === 503 ||
     msg.includes("429") ||
     msg.includes("503") ||
+    msg.includes("no longer available") ||
+    msg.includes("not found") ||
     msg.includes("quota") ||
     msg.includes("resource exhausted") ||
     msg.includes("high demand") ||
@@ -148,6 +147,27 @@ function guessMimeType(uri: string) {
   if (lower.includes(".webp")) return "image/webp";
   if (lower.includes(".gif")) return "image/gif";
   return "image/jpeg";
+}
+
+function userPhotoHistoryPlaceholder(locale: ChatReplyLocale) {
+  return locale === "en"
+    ? "[The user attached a pet photo in this message.]"
+    : "[사용자가 이 메시지에 반려동물 사진을 첨부했습니다.]";
+}
+
+function messageReferencesRecentPhoto(text: string) {
+  const normalized = text.toLowerCase();
+
+  return (
+    normalized.includes("사진") ||
+    normalized.includes("이미지") ||
+    normalized.includes("얘") ||
+    normalized.includes("이 아이") ||
+    normalized.includes("this photo") ||
+    normalized.includes("this image") ||
+    normalized.includes("this pet") ||
+    normalized.includes("my photo")
+  );
 }
 
 async function imageToBase64(
@@ -1006,7 +1026,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   messagesContent: {
-    paddingBottom: 12,
+    paddingBottom: 4,
     flexGrow: 1,
   },
   emptyHint: {
