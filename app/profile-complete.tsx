@@ -133,10 +133,8 @@ export default function ProfileCompleteScreen() {
 
       const email = parsedUser.email;
 
-      storageKeys.petProfiles(email);
-      storageKeys.petProfileDraft(email);
-      storageKeys.profileCompleted(email);
-      storageKeys.petProfileFlowMode(email);
+      await AsyncStorage.removeItem(storageKeys.petProfileDraft(email));
+      await AsyncStorage.removeItem(storageKeys.petProfileFlowMode(email));
 
       router.push({
         pathname: "/profile",

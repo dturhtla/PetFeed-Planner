@@ -24,6 +24,16 @@ const KOR_TO_WEEKDAY: Record<string, number> = {
   토: 7,
 };
 
+function getFeedingAlarmChannelId(
+  soundEnabled: boolean,
+  vibrationEnabled: boolean,
+) {
+  if (soundEnabled && vibrationEnabled) return "feeding-alarm-sound-vibration";
+  if (soundEnabled && !vibrationEnabled) return "feeding-alarm-sound-only";
+  if (!soundEnabled && vibrationEnabled) return "feeding-alarm-vibration-only";
+  return "feeding-alarm-silent";
+}
+
 Notifications.setNotificationHandler({
   handleNotification: async () => {
     const savedSound = await AsyncStorage.getItem(
@@ -63,15 +73,23 @@ async function ensureNotificationPermission() {
   return finalStatus === "granted";
 }
 
-async function ensureAndroidChannel(vibrationEnabled: boolean) {
+async function ensureAndroidChannel(
+  soundEnabled: boolean,
+  vibrationEnabled: boolean,
+) {
   if (Platform.OS !== "android") return;
 
-  await Notifications.setNotificationChannelAsync("feeding-alarm", {
+  const channelId = getFeedingAlarmChannelId(soundEnabled, vibrationEnabled);
+
+  await Notifications.setNotificationChannelAsync(channelId, {
     name: "급여 알림",
     importance: Notifications.AndroidImportance.HIGH,
     vibrationPattern: vibrationEnabled ? [0, 250, 250, 250] : [],
     lightColor: "#2F6B57",
+    sound: soundEnabled ? "default" : undefined,
   });
+
+  return channelId;
 }
 
 export async function clearFeedingAlarmNotifications() {
@@ -107,7 +125,7 @@ export async function syncFeedingAlarmNotifications(
   const soundEnabled = savedSound !== "false";
   const vibrationEnabled = savedVibration !== "false";
 
-  await ensureAndroidChannel(vibrationEnabled);
+  const channelId = await ensureAndroidChannel(soundEnabled, vibrationEnabled);
   await clearFeedingAlarmNotifications();
 
   const enabledAlarms = alarms.filter(
@@ -125,7 +143,7 @@ export async function syncFeedingAlarmNotifications(
         content: {
           title: "급여 알림",
           body: `${alarm.foodName} ${alarm.amount}g 급여할 시간이에요.`,
-          sound: soundEnabled,
+          sound: soundEnabled ? "default" : undefined,
           data: {
             kind: "feeding-alarm",
             alarmId: alarm.id,
@@ -136,7 +154,7 @@ export async function syncFeedingAlarmNotifications(
           weekday,
           hour: hour24,
           minute: Number(alarm.minute),
-          channelId: "feeding-alarm",
+          channelId: channelId ?? "feeding-alarm-sound-vibration",
         },
       });
     }

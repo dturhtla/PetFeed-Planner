@@ -27,6 +27,9 @@ module.exports = {
       goServerUrl: (process.env.EXPO_PUBLIC_GO_SERVER_URL || "").trim(),
       chatApiUrl: (process.env.EXPO_PUBLIC_CHAT_API_URL || "").trim(),
       chatUserId: (process.env.EXPO_PUBLIC_CHAT_USER_ID || "").trim(),
+      eas: {
+        projectId: "0fb4a014-c5a7-42c2-b37c-7e0152d22d6d",
+      },
     },
   },
 };

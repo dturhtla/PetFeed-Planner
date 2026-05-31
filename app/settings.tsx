@@ -81,7 +81,7 @@ export default function SettingsScreen() {
         style: "destructive",
         onPress: async () => {
           try {
-            await AsyncStorage.removeItem("loggedInUser");
+            await AsyncStorage.removeItem(storageKeys.loggedInUser);
 
             router.replace("/" as any); // 바로 이동
           } catch (error) {

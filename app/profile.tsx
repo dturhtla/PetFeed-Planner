@@ -351,8 +351,13 @@ export default function ProfileScreen() {
   const saveDraft = async () => {
     if (!userEmail) return;
 
+    const currentProfile = profiles.find(
+      (profile) => profile.id === selectedProfileId,
+    );
+
     const draft: ProfileData = {
       id: selectedProfileId ?? `local_${Date.now()}_${Math.random()}`,
+      serverPetId: currentProfile?.serverPetId,
       name: normalizeName(filterNameInput(name)),
       age: formatAgeForSave(),
       weight: weight.trim(),
@@ -443,12 +448,17 @@ export default function ProfileScreen() {
       }
 
       if (returnedFromBcsEdit || returnedFromDiseaseEdit) {
-        const editingProfile =
+        const originalProfile =
           returnedProfileId !== null
             ? parsedProfiles.find((profile) => profile.id === returnedProfileId)
-            : parsedDraft || parsedProfile;
+            : parsedProfile;
 
-        applyProfileData(editingProfile || undefined);
+        const editingProfile = {
+          ...(originalProfile || {}),
+          ...(parsedDraft || {}),
+        } as ProfileData;
+
+        applyProfileData(editingProfile);
 
         if (returnedSelectedBcs) {
           setBcs(returnedSelectedBcs);
@@ -459,7 +469,7 @@ export default function ProfileScreen() {
         }
 
         setProfileEntryMode(storedFlowMode);
-        setSelectedProfileId(editingProfile?.id ?? null);
+        setSelectedProfileId(editingProfile.id ?? returnedProfileId ?? null);
         setIsFirstInputMode(false);
         setIsEditMode(true);
         setErrors({});
@@ -778,6 +788,7 @@ export default function ProfileScreen() {
         storageKeys.profileCompleted(userEmail),
         "true",
       );
+      await AsyncStorage.removeItem(storageKeys.petProfileDraft(userEmail));
       await AsyncStorage.removeItem(storageKeys.petProfileFlowMode(userEmail));
 
       setProfiles(updatedProfiles);
