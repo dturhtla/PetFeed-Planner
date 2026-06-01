@@ -35,9 +35,8 @@ import EditableTimeWheel, {
   TIME_WHEEL_ITEM_HEIGHT as ITEM_HEIGHT,
 } from "../components/EditableTimeWheel";
 import {
-  cleanupGhostFeedingNotifications,
   syncFeedingAlarmNotifications,
-  to24Hour,
+  to24Hour
 } from "../utils/feedingAlarmNotifications";
 import { storageKeys } from "../utils/storageKeys";
 
@@ -309,17 +308,16 @@ export default function FeedingAlarmScreen() {
   useEffect(() => {
     if (!isLoaded || !userEmail || !petId || typeof petId !== "string") return;
 
-    const saveAndSync = async () => {
+    const saveOnly = async () => {
       try {
         const alarmsKey = storageKeys.feedingAlarms(userEmail, petId);
         await AsyncStorage.setItem(alarmsKey, JSON.stringify(alarms));
-        await syncFeedingAlarmNotifications(alarms);
       } catch (error) {
         console.log(error);
       }
     };
 
-    saveAndSync();
+    saveOnly();
   }, [alarms, isLoaded, userEmail, petId]);
 
   useEffect(() => {
@@ -348,10 +346,6 @@ export default function FeedingAlarmScreen() {
     selectedMinute,
     editingTimeField,
   ]);
-
-  useEffect(() => {
-    cleanupGhostFeedingNotifications();
-  }, []);
 
   const resetForm = () => {
     setSelectedPeriod("오후");
@@ -622,17 +616,25 @@ export default function FeedingAlarmScreen() {
           : true,
       };
 
-      if (editingAlarmId) {
-        setAlarms((prev) =>
-          prev.map((alarm) => (alarm.id === editingAlarmId ? payload : alarm)),
-        );
-        show("알람이 수정되었습니다.");
-      } else {
-        setAlarms((prev) => [...prev, payload]);
-        show("급여 알람이 등록되었습니다.");
-      }
+      const updatedAlarms = editingAlarmId
+        ? alarms.map((alarm) => (alarm.id === editingAlarmId ? payload : alarm))
+        : [...alarms, payload];
 
+      setAlarms(updatedAlarms);
       closeForm();
+
+      const alarmsKey = storageKeys.feedingAlarms(userEmail, petId as string);
+      AsyncStorage.setItem(alarmsKey, JSON.stringify(updatedAlarms)).catch(
+        console.log,
+      );
+
+      syncFeedingAlarmNotifications(updatedAlarms).catch(console.log);
+
+      show(
+        editingAlarmId
+          ? "알람이 수정되었습니다."
+          : "급여 알람이 등록되었습니다.",
+      );
     } catch (error) {
       console.log("handleSaveAlarm error:", error);
       Alert.alert(
@@ -645,11 +647,19 @@ export default function FeedingAlarmScreen() {
   };
 
   const toggleAlarmEnabled = (id: string) => {
-    setAlarms((prev) =>
-      prev.map((alarm) =>
-        alarm.id === id ? { ...alarm, enabled: !alarm.enabled } : alarm,
-      ),
+    const updatedAlarms = alarms.map((alarm) =>
+      alarm.id === id ? { ...alarm, enabled: !alarm.enabled } : alarm,
     );
+
+    setAlarms(updatedAlarms);
+
+    if (userEmail && petId && typeof petId === "string") {
+      const alarmsKey = storageKeys.feedingAlarms(userEmail, petId);
+      AsyncStorage.setItem(alarmsKey, JSON.stringify(updatedAlarms)).catch(
+        console.log,
+      );
+      syncFeedingAlarmNotifications(updatedAlarms).catch(console.log);
+    }
   };
 
   const handleEditAlarm = (alarm: AlarmItem) => {
@@ -699,9 +709,19 @@ export default function FeedingAlarmScreen() {
     try {
       setIsDeletingAlarm(true);
 
-      setAlarms((prev) =>
-        prev.filter((alarm) => !selectedAlarmIds.includes(alarm.id)),
+      const updatedAlarms = alarms.filter(
+        (alarm) => !selectedAlarmIds.includes(alarm.id),
       );
+
+      setAlarms(updatedAlarms);
+
+      if (userEmail && petId && typeof petId === "string") {
+        const alarmsKey = storageKeys.feedingAlarms(userEmail, petId);
+        AsyncStorage.setItem(alarmsKey, JSON.stringify(updatedAlarms)).catch(
+          console.log,
+        );
+        syncFeedingAlarmNotifications(updatedAlarms).catch(console.log);
+      }
 
       show("알람이 삭제되었습니다.");
 
