@@ -1,0 +1,10 @@
+go mod init 프로젝트 이름 부터 실행 할 것
+sql developer는 검색해도 안나와서 직접 c드라이브에서 찾아서 실행해야 함
+① 이미지 경로 처리
+이미지는 uploads/ 폴더에 저장하되, DB(Oracle)에는 C:\project\uploads\img.jpg 같은 전체 경로가 아니라 uploads/img.jpg 같은 상대 경로로 저장해야 나중에 서버를 옮겨도 문제가 생기지 않습니다.
+ngrok http 8080 실행 후
+go run 파일명.go
+스웨거 사용법 go run main.go 이후 http://192.168.1.5:8080/swagger/index.html로 접속
+집에선 http://https://preirrigational-concha-prealpha/swagger/index.html
+코드 수정할 때마다 swag init 할 것.
+ngrok 주소 접속 https://preirrigational-concha-prealphabetically.ngrok-free.dev/swagger/index.html

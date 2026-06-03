@@ -1,0 +1,988 @@
+basePath: /api/v1
+definitions:
+  main.AIAnalysisResultInput:
+    properties:
+      bcs:
+        example: 5
+        type: integer
+      food_id:
+        description: 분석 결과 식별된 사료 번호
+        example: 101
+        type: integer
+      recommended_amount:
+        example: 150.5
+        type: number
+    type: object
+  main.ChangeFoodInput:
+    properties:
+      new_food_id:
+        example: 5
+        type: integer
+      pet_id:
+        example: 101
+        type: integer
+    required:
+    - new_food_id
+    - pet_id
+    type: object
+  main.ChatLog:
+    properties:
+      message:
+        type: string
+      role:
+        type: string
+    type: object
+  main.DailyConsumptionResponse:
+    properties:
+      consumption_rate:
+        type: number
+      date:
+        type: string
+      log_count:
+        type: integer
+      pet_id:
+        type: integer
+      status_color:
+        type: string
+      total_consumption:
+        type: number
+      total_fed:
+        type: number
+      total_remaining:
+        type: number
+    type: object
+  main.DeleteFeedLogInput:
+    properties:
+      feed_amount:
+        example: 100
+        type: number
+      feed_time:
+        description: YYYY-MM-DD HH24:MI:SS
+        example: "2026-05-17 14:00:00"
+        type: string
+      pet_id:
+        example: 166
+        type: integer
+    type: object
+  main.FeedingSessionElement:
+    properties:
+      consumed_amount:
+        description: 회당 섭취량 (g)
+        type: number
+      current_food_id:
+        description: 해당 세션 당시의 사료 고유 ID
+        type: integer
+      fed_amount:
+        description: 회당 급여량 (g)
+        type: number
+      feed_type:
+        description: '[추가] ''AUTO'' 또는 ''MANUAL'''
+        type: string
+      feeding_time:
+        description: 급여 시작 시간 (YYYY-MM-DD HH24:MI:SS)
+        type: string
+      food_name:
+        description: '[추가] 실제 사료 이름 (예: 로얄캐닌 닥터)'
+        type: string
+      log_id:
+        description: '[추가] 로그 고유 고유 ID'
+        type: integer
+    type: object
+  main.FoodRegistrationInput:
+    properties:
+      fat_pct:
+        example: 13
+        type: number
+      kcal_per_g:
+        example: 3.85
+        type: number
+      product_name:
+        example: 로얄캐닌 인도어
+        type: string
+      protein_pct:
+        example: 27.5
+        type: number
+    type: object
+  main.IoTWeightInput:
+    properties:
+      feed_weight:
+        description: "\U0001F4A1 변경점: float64 -> *float64 로 변경하여 0.0 값을 허용하도록 처리"
+        example: 45.2
+        type: number
+      pet_id:
+        description: 기기 할당 반려동물 ID
+        example: 126
+        type: integer
+    required:
+    - feed_weight
+    - pet_id
+    type: object
+  main.LoginInput:
+    properties:
+      email:
+        example: test@sunmoon.ac.kr
+        type: string
+      password:
+        example: password123!
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  main.ManualFeedInput:
+    properties:
+      consumption:
+        description: 섭취량 (g)
+        example: 20
+        type: number
+      feed_amount:
+        description: 급여량 (g)
+        example: 23
+        type: number
+      feed_time:
+        description: YYYY-MM-DD HH24:MI:SS
+        example: "2026-05-20 13:05:00"
+        type: string
+      pet_id:
+        example: 166
+        type: integer
+    type: object
+  main.MealDetailsRequest:
+    properties:
+      feed_time:
+        description: YYYY-MM-DD HH24:MI:SS 형식
+        example: "2026-05-13 14:12:39"
+        type: string
+      pet_id:
+        example: 166
+        type: integer
+    type: object
+  main.MealDetailsResponse:
+    properties:
+      consumption:
+        description: 1회 섭취량 (g)
+        type: number
+      feed_amount:
+        description: 1회 급여량 (g)
+        type: number
+      food_name:
+        description: 사료명
+        type: string
+    type: object
+  main.MonthlyConsumptionElement:
+    properties:
+      consumption_rate:
+        description: 당일 섭취율 (%)
+        type: number
+      date:
+        description: 날짜 (YYYY-MM-DD)
+        type: string
+      status_color:
+        description: 상태 색상 (초록/노랑/빨강)
+        type: string
+      total_consumption:
+        description: 당일 총 섭취량 (g)
+        type: number
+      total_fed:
+        description: '[복구] 당일 총 급여량 (g)'
+        type: number
+      total_remaining:
+        description: '[복구] 당일 최종 잔량 (g)'
+        type: number
+    type: object
+  main.MonthlyConsumptionResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/main.MonthlyConsumptionElement'
+        type: array
+      month:
+        description: 조회 월 (YYYY-MM)
+        type: string
+      pet_id:
+        type: integer
+    type: object
+  main.PetBCSUpdateInput:
+    properties:
+      bcs:
+        description: 1~9 사이의 비만도 점수
+        example: 5
+        type: integer
+    required:
+    - bcs
+    type: object
+  main.PetRegistrationInput:
+    properties:
+      bcs_score:
+        description: '[추가] BCS 점수'
+        example: 1
+        type: integer
+      birth_date:
+        example: "2024-01-01"
+        type: string
+      breed:
+        example: Poodle
+        type: string
+      current_weight:
+        example: 7.5
+        type: number
+      gender:
+        example: U
+        type: string
+      health_status:
+        description: '[수정] 문자열 배열로 변경'
+        items:
+          type: string
+        type: array
+      name:
+        example: 성공이
+        type: string
+      species:
+        example: Dog
+        type: string
+      user_id:
+        example: 1
+        type: integer
+    type: object
+  main.PetSessionListResponse:
+    properties:
+      date:
+        type: string
+      pet_id:
+        type: integer
+      session_count:
+        type: integer
+      sessions:
+        items:
+          $ref: '#/definitions/main.FeedingSessionElement'
+        type: array
+    type: object
+  main.RegisterInput:
+    properties:
+      email:
+        example: test@sunmoon.ac.kr
+        type: string
+      password:
+        example: pass1234
+        type: string
+    required:
+    - email
+    - password
+    type: object
+  main.SaveChatTurnInput:
+    properties:
+      ai_message:
+        example: 오늘 성공이는 총 120g을 먹었습니다.
+        type: string
+      user_id:
+        example: 1
+        type: integer
+      user_message:
+        example: 성공이 오늘 사료 얼마나 먹었어?
+        type: string
+    required:
+    - ai_message
+    - user_id
+    - user_message
+    type: object
+  main.SetActivePetInput:
+    properties:
+      pet_id:
+        type: integer
+    required:
+    - pet_id
+    type: object
+  main.UpdateFoodInput:
+    properties:
+      food_id:
+        example: 5
+        type: integer
+    required:
+    - food_id
+    type: object
+  main.UpdatePasswordInput:
+    properties:
+      email:
+        example: test@sunmoon.ac.kr
+        type: string
+      new_password:
+        example: newPassword123!
+        type: string
+    required:
+    - email
+    - new_password
+    type: object
+  main.UpdatePetInput:
+    properties:
+      bcs_score:
+        example: 1
+        type: integer
+      birth_date:
+        description: 포맷 가이드 변경 (YYYY-MM-DD)
+        example: "2024-01-01"
+        type: string
+      breed:
+        example: Poodle
+        type: string
+      current_food_id:
+        example: 0
+        type: integer
+      current_weight:
+        example: 7.5
+        type: number
+      gender:
+        enum:
+        - M
+        - F
+        - U
+        example: U
+        type: string
+      health_status:
+        description: '수정: 단일 string에서 문자열 슬라이스로 변경'
+        example:
+        - diabetes
+        - arthritis
+        items:
+          type: string
+        type: array
+      name:
+        example: 성공이
+        type: string
+      photo_url:
+        example: ""
+        type: string
+      recommended_feed_amount:
+        example: 0
+        type: number
+      rer_value:
+        example: 317.24
+        type: number
+      species:
+        example: Dog
+        type: string
+    required:
+    - name
+    type: object
+info:
+  contact: {}
+  description: 반려동물 건강 관리 및 AI 분석 백엔드 서버입니다.
+  title: PetFeed API Server
+  version: "1.0"
+paths:
+  /auth/register:
+    post:
+      consumes:
+      - application/json
+      description: Email과 Password를 받아 등록하고, 생성된 USER_ID를 반환합니다.
+      parameters:
+      - description: 회원가입 정보
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.RegisterInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 신규 사용자 등록 (ID 반환)
+  /chat/history/{userId}:
+    get:
+      description: 특정 유저의 최근 대화 10건을 가져와 AI 문맥으로 활용합니다.
+      parameters:
+      - description: User ID
+        in: path
+        name: userId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/main.ChatLog'
+            type: array
+      summary: 최근 대화 내역 조회
+  /chat/save-turn:
+    post:
+      consumes:
+      - application/json
+      description: 사용자의 질문과 AI의 답변을 하나의 트랜잭션으로 DB에 안전하게 기록합니다.
+      parameters:
+      - description: 저장할 대화 세트
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.SaveChatTurnInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 대화 세트(질문+답변) 동시 저장
+  /config/active-pet:
+    get:
+      description: CURRENT_ACTIVE_PET 테이블에 저장된 현재 활성 펫 ID를 반환합니다.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 현재 설정된 대상 펫 ID 조회
+      tags:
+      - Config
+    put:
+      consumes:
+      - application/json
+      description: CURRENT_ACTIVE_PET 테이블의 펫 ID를 업데이트합니다.
+      parameters:
+      - description: 설정할 대상 펫 정보
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.SetActivePetInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 급여기 대상 펫 설정 (Active Pet 변경)
+      tags:
+      - Config
+  /foods:
+    post:
+      consumes:
+      - application/json
+      description: 사료의 영양 성분을 먼저 등록하고 생성된 food_id를 반환받습니다.
+      parameters:
+      - description: 사료 상세 정보
+        in: body
+        name: food
+        required: true
+        schema:
+          $ref: '#/definitions/main.FoodRegistrationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 사료 기초 정보 등록
+  /foods/photo:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 등록된 사료 ID에 분석용 사진 경로를 매핑합니다.
+      parameters:
+      - description: Food ID
+        in: formData
+        name: food_id
+        required: true
+        type: string
+      - description: Food Pack Photo
+        in: formData
+        name: photo
+        required: true
+        type: file
+      responses: {}
+      summary: 사료 봉투 사진 업로드
+  /iot/self-manual-weight:
+    post:
+      consumes:
+      - application/json
+      description: 이전 잔량을 무시하고 입력값을 저장하되, 동일한 시간의 중복 입력은 차단합니다.
+      parameters:
+      - description: 수동 급여 데이터
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.ManualFeedInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 수동 급여 기록 저장
+      tags:
+      - Pets
+  /iot/weight:
+    post:
+      consumes:
+      - application/json
+      description: 실시간 사료 잔량 데이터를 수신합니다. PETS에서 사료 ID를 선조회 후 로그 테이블에 정석 인서트하여 바인딩
+        오류를 해결합니다.
+      parameters:
+      - description: 무게 데이터
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.IoTWeightInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: IoT 사료 무게 수신
+      tags:
+      - IoT
+  /iot/weight-pair:
+    delete:
+      consumes:
+      - application/json
+      description: 입력한 급여 로그와 그 바로 다음에 기록된 섭취 완료 로그를 찾아 함께 삭제합니다.
+      parameters:
+      - description: 삭제 요청 데이터
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.DeleteFeedLogInput'
+      produces:
+      - application/json
+      responses: {}
+      summary: 급여 기록 쌍 삭제
+  /logs/{logId}:
+    delete:
+      description: LOG_ID를 기준으로 특정 사료 무게 로그를 삭제합니다.
+      parameters:
+      - description: 삭제할 로그의 LOG_ID
+        in: path
+        name: logId
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 특정 사료 로그 삭제
+      tags:
+      - Logs
+  /pets:
+    post:
+      consumes:
+      - application/json
+      description: 새로운 반려동물을 등록하고 별도 테이블에 다중 건강 상태를 저장합니다.
+      parameters:
+      - description: 반려동물 등록 정보
+        in: body
+        name: pet
+        required: true
+        schema:
+          $ref: '#/definitions/main.PetRegistrationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 등록
+  /pets/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: pet_id를 이용해 해당 반려동물의 정보를 DB에서 영구 삭제합니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 정보 삭제
+    get:
+      description: AI 모듈이나 프론트엔드에서 반려동물의 현재 상태 및 다중 질병 목록을 가져옵니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 상세 정보 조회
+    put:
+      consumes:
+      - application/json
+      description: 제공된 모든 필드 및 다중 질병 목록을 바탕으로 반려동물 정보를 최신화합니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 수정할 상세 데이터
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.UpdatePetInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 상세 정보 통합 수정
+  /pets/{id}/analysis:
+    patch:
+      consumes:
+      - application/json
+      description: 비만도, 급여량과 함께 분석된 사료의 ID(FK)를 PETS 테이블에 저장합니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: AI 분석 결과 (BCS, 추천급여량)
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/main.AIAnalysisResultInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: AI 분석 결과 통합 저장 (BCS + 급여량 + 사료 연결)
+  /pets/{id}/bcs:
+    patch:
+      consumes:
+      - application/json
+      description: AI 분석 결과를 받아 반려동물의 BCS 점수와 분석 날짜를 최신화합니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: BCS 분석 결과
+        in: body
+        name: bcs
+        required: true
+        schema:
+          $ref: '#/definitions/main.PetBCSUpdateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 비만도(BCS) 업데이트
+  /pets/{id}/consumption:
+    get:
+      description: 특정 날짜의 무게 변화를 분석하여 총 급여량, 섭취량, 잔량을 반환합니다. 수동 입력 데이터는 이전 잔량 차감 없이
+        입력값 그대로 누적하며, 잔량은 (총급여-총섭취)로 계산됩니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 조회 날짜 (YYYY-MM-DD)
+        in: query
+        name: date
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.DailyConsumptionResponse'
+      summary: 일일 총 섭취량 및 통계 조회
+      tags:
+      - Pets
+  /pets/{id}/food:
+    patch:
+      consumes:
+      - application/json
+      description: 지정된 반려동물의 현재 급여 사료(CURRENT_FOOD_ID)만 단독으로 변경합니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 새로운 사료 ID
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.UpdateFoodInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 사료 단독 교체
+      tags:
+      - Pets
+  /pets/{id}/monthly-consumption:
+    get:
+      description: 특정 월(YYYY-MM)의 일별 사료 무게 변화를 조회하여 통계 리스트를 반환합니다. 수동 입력 데이터는 잔량 차감
+        없이 입력값 그대로 반영되며, 잔량은 (총급여-총섭취)로 계산됩니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 조회 월 (YYYY-MM)
+        in: query
+        name: month
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.MonthlyConsumptionResponse'
+      summary: 월간 일별 섭취율 및 통계 조회
+      tags:
+      - Pets
+  /pets/{id}/sessions:
+    get:
+      description: 특정 날짜의 사료 무게 로그를 분석하여 LOG_ID와 FEED_TYPE이 포함된 세션 타임라인을 반환합니다.
+      parameters:
+      - description: Pet ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: 조회 날짜 (YYYY-MM-DD)
+        in: query
+        name: date
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.PetSessionListResponse'
+      summary: 반려동물 회당 급여 및 섭취 목록 조회
+      tags:
+      - Pets
+  /pets/food:
+    put:
+      consumes:
+      - application/json
+      description: 반려동물의 현재 사료(CURRENT_FOOD_ID)를 교체합니다. 과거 무게 로그의 사료 히스토리는 유지되며, 이후
+        적재되는 로그부터 새 사료 ID가 적용됩니다.
+      parameters:
+      - description: 사료 교체 정보
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.ChangeFoodInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{"status":"success","message":"..."}'
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: '{"error":"입력 데이터가 올바르지 않습니다."}'
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: '{"error":"존재하지 않는 반려동물 ID입니다."}'
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: '{"error":"사료 정보 변경 중 오류가 발생했습니다."}'
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 사료 교체
+      tags:
+      - Pets
+  /pets/meal-details:
+    post:
+      consumes:
+      - application/json
+      description: 특정 급여 시간을 기준으로 사료명, 급여량, 실제 섭취량을 계산하여 반환합니다.
+      parameters:
+      - description: 급여 조회 요청 정보
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.MealDetailsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.MealDetailsResponse'
+      summary: 1회 급여량 및 섭취량 상세 조회
+  /pets/photo:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 비만도 분석을 위한 사진을 업로드하고 DB에 경로를 저장합니다.
+      parameters:
+      - description: Pet ID
+        in: formData
+        name: pet_id
+        required: true
+        type: string
+      - description: Pet Photo File
+        in: formData
+        name: photo
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 반려동물 사진 업로드
+  /users/{id}:
+    delete:
+      description: 사용자와 관련된 모든 데이터(반려동물, 로그 등)를 삭제하고 탈퇴 처리합니다.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 회원 탈퇴
+  /users/{id}/pets:
+    get:
+      description: 특정 유저가 등록한 모든 반려동물의 리스트를 가져옵니다.
+      parameters:
+      - description: User ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              additionalProperties: true
+              type: object
+            type: array
+      summary: 유저별 반려동물 목록 조회
+  /users/login:
+    post:
+      consumes:
+      - application/json
+      description: 이메일과 비밀번호를 검증하여 로그인을 처리하고 고유 USER_ID를 반환합니다.
+      parameters:
+      - description: 로그인 정보
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.LoginInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 사용자 로그인
+  /users/password:
+    put:
+      consumes:
+      - application/json
+      description: 가입된 이메일을 조회하여 해당 사용자의 비밀번호를 새로운 비밀번호로 최신화합니다.
+      parameters:
+      - description: 비밀번호 변경 요청 데이터
+        in: body
+        name: data
+        required: true
+        schema:
+          $ref: '#/definitions/main.UpdatePasswordInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 사용자 비밀번호 수정 (이메일 기준)
+swagger: "2.0"
